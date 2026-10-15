@@ -119,6 +119,7 @@ const ZH: Record<string, string> = {
     "Play from here": "从这里开始播放",
     "Play the preview": "播放预览",
     Select: "选择",
+    "Arrange nodes": "一键整理",
     "Pick things to talk about with the AI. Shift-click to pick more.":
       "选择要与智能体讨论的内容。按住 Shift 键点击可多选。",
     Text: "文字",
@@ -695,7 +696,7 @@ const ZH: Record<string, string> = {
   "Starting conversation": "正在开始对话",
   Status: "状态",
   Stop: "停止",
-  Story: "故事",
+  Story: "剧情",
   "Table unavailable. Restore its file to load it again.":
     "表格不可用。恢复其文件后重新加载。",
   Text: "文本",

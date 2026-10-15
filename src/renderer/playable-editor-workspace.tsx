@@ -1,4 +1,5 @@
 import {
+  ArrowDownUp,
   Clapperboard,
   Code2,
   FileText,
@@ -43,6 +44,7 @@ import {
   type NodeCodebaseUpdate,
   type NodeEditorLayout,
 } from "../shared/playable-codebase.js";
+import { arrangePlayableNodes } from "./playable-flow.js";
 import { type NodeGraph, type PlayableNode } from "../shared/playable-nodes.js";
 import {
   setPlayableElementStyle,
@@ -790,6 +792,32 @@ export function PlayableEditorWorkspace({
       observeHistory(current);
       updateHistoryControls();
     }, 0);
+  }
+
+  function arrangeStoryNodes(): void {
+    const instance = canvas.current;
+    if (!instance || nodes.length < 2 || !codebase) return;
+    const positions = arrangePlayableNodes(
+      instance.getNodes(),
+      instance.getEdges(),
+      codebase.graph.entryNodeId,
+    );
+    if (nodes.every((node) => {
+      const position = positions[node.id];
+      return position?.x === node.position.x && position?.y === node.position.y;
+    })) return;
+
+    beginHistoryGesture();
+    redoHistory.current = [];
+    setNodes((current) => current.map((node) => ({
+      ...node,
+      position: positions[node.id] ?? node.position,
+    })));
+    window.requestAnimationFrame(() => {
+      const fit = canvas.current?.fitView({ padding: 0.2, duration: 200 });
+      if (fit) void fit.then(finishHistoryGesture, finishHistoryGesture);
+      else finishHistoryGesture();
+    });
   }
 
   useEffect(() => {
@@ -1970,6 +1998,17 @@ export function PlayableEditorWorkspace({
                         void addNodeFromPreset(presetId, position)
                       }
                     />
+                  }
+                  arrangeControl={
+                    <button
+                      type="button"
+                      title="Arrange nodes"
+                      aria-label="Arrange nodes"
+                      disabled={writing || nodes.length < 2}
+                      onClick={arrangeStoryNodes}
+                    >
+                      <ArrowDownUp size={18} />
+                    </button>
                   }
                   onOpenMenu={setCanvasContextMenu}
                   deleteKeyCode={
