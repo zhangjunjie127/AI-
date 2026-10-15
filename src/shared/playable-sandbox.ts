@@ -787,11 +787,25 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
                 target.setAttribute(attribute.name, rewritten);
             }
           }
+          const root = element.getRootNode();
+          const bounds =
+            root instanceof ShadowRoot
+              ? root.host.getBoundingClientRect()
+              : undefined;
+          const computedTranslate = view.getComputedStyle(element).translate;
+          const translate =
+            bounds &&
+            parsePlayableTranslate(computedTranslate, bounds);
           const [translateX = "0px", translateY = "0px"] =
-            view.getComputedStyle(element).translate === "none"
+            computedTranslate === "none"
               ? []
-              : view.getComputedStyle(element).translate.split(/\s+/);
-          clone.style.translate = `calc(${translateX} + 2cqw) calc(${translateY} + 2cqh)`;
+              : computedTranslate.split(/\s+/);
+          clone.style.translate = translate
+            ? (playableTranslateValue({
+                x: translate.x + 2,
+                y: translate.y + 2,
+              }) ?? "")
+            : `calc(${translateX} + 2cqw) calc(${translateY} + 2cqh)`;
           const previewHtml = clone.outerHTML;
           const sourceClone = clone.cloneNode(true) as HTMLElement;
           for (const target of [

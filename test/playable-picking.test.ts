@@ -918,6 +918,38 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
       buttons[1]!.querySelector("span")!.getAttribute("data-putenggame-source"),
     ).toBe("nodes/choice/index.html:3:1");
 
+    const onMove = vi.fn();
+    host.startPicking("move", {
+      onPick: () => undefined,
+      onTextSelect: () => undefined,
+      onInteractionSelect: () => undefined,
+      onTextEdit: () => undefined,
+      onTextCreate: () => undefined,
+      onMove,
+      onTransform: () => undefined,
+      onDelete: () => undefined,
+      onPasteElements,
+      onCancel: () => undefined,
+    });
+    const moveDown = new Event("pointerdown", { bubbles: true, composed: true });
+    Object.assign(moveDown, {
+      button: 0,
+      pointerId: 2,
+      clientX: 20,
+      clientY: 30,
+    });
+    buttons[1]!.dispatchEvent(moveDown);
+    const move = new Event("pointermove", { bubbles: true, composed: true });
+    Object.assign(move, { pointerId: 2, clientX: 40, clientY: 50 });
+    root.dispatchEvent(move);
+    const moveUp = new Event("pointerup", { bubbles: true, composed: true });
+    Object.assign(moveUp, { button: 0, pointerId: 2, clientX: 40, clientY: 50 });
+    root.dispatchEvent(moveUp);
+
+    expect(onMove).toHaveBeenCalledOnce();
+    expect(onMove.mock.calls[0]![0]).toMatchObject({ inPlace: true });
+    expect(buttons[1]!.style.translate).not.toContain("calc(");
+
     host.destroy();
     window.close();
   });
