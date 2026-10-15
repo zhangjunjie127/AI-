@@ -142,6 +142,15 @@ export interface PlayableDeleteEdit {
   inPlace: boolean;
 }
 
+export interface PlayableElementCopy {
+  pick: PlayablePickResult;
+  /** Sanitized markup persisted to the Scene source. */
+  html: string;
+  /** Live markup keeps preview-only media URLs so the preview is not reloaded. */
+  previewHtml: string;
+  ids: string[];
+}
+
 export interface PlayableAssetTransfer {
   contentType: string;
   bytes: ArrayBuffer;
@@ -189,6 +198,13 @@ export type PlayableHostMessage =
       instanceId: string;
       id: string;
       source?: string;
+    }
+  | {
+      kind: "putenggame:playable:element-paste-result";
+      instanceId: string;
+      requestId: string;
+      sources?: Record<string, string>;
+      error?: string;
     }
   | {
       kind: "putenggame:playable:media-command";
@@ -270,6 +286,12 @@ export type PlayableFrameMessage =
       edit: PlayableDeleteEdit;
     }
   | {
+      kind: "putenggame:playable:element-paste";
+      instanceId: string;
+      requestId: string;
+      copies: PlayableElementCopy[];
+    }
+  | {
       kind: "putenggame:playable:media-state";
       instanceId: string;
       state: PlayableMediaState;
@@ -307,6 +329,17 @@ export function isPlayableHostMessage(
       typeof value.id === "string" &&
       (value.source === undefined || typeof value.source === "string")
     );
+  if (value.kind === "putenggame:playable:element-paste-result")
+    return (
+      typeof value.requestId === "string" &&
+      (value.error === undefined || typeof value.error === "string") &&
+      (value.sources === undefined ||
+        (isRecord(value.sources) &&
+          Object.entries(value.sources).every(
+            ([id, source]) =>
+              /^putenggame-copy-[\w-]+$/.test(id) && typeof source === "string",
+          )))
+    );
   if (value.kind === "putenggame:playable:appearance-timing") {
     const command = value.command;
     return (
@@ -337,9 +370,11 @@ export function isPlayableHostMessage(
     );
   }
   if (value.kind === "putenggame:playable:backdrop-effects")
-    return isRecord(value.effects) &&
+    return (
+      isRecord(value.effects) &&
       typeof value.effects.vignette === "boolean" &&
-      typeof value.effects.grain === "boolean";
+      typeof value.effects.grain === "boolean"
+    );
   if (value.kind === "putenggame:playable:media-command")
     return (
       isRecord(value.command) &&
@@ -448,6 +483,48 @@ export function isPlayableFrameMessage(
       isRecord(value.edit.pick) &&
       typeof value.edit.inPlace === "boolean"
     );
+  if (value.kind === "putenggame:playable:element-paste") {
+    const copies = value.copies;
+    return (
+      typeof value.requestId === "string" &&
+      Array.isArray(copies) &&
+      copies.length > 0 &&
+      copies.length <= 32 &&
+      copies.reduce(
+        (size, copy) =>
+          size +
+          (isRecord(copy) && typeof copy.html === "string"
+            ? copy.html.length
+            : Number.POSITIVE_INFINITY) +
+          (isRecord(copy) && typeof copy.previewHtml === "string"
+            ? copy.previewHtml.length
+            : Number.POSITIVE_INFINITY),
+        0,
+      ) <=
+        2 * 1024 * 1024 &&
+      copies.every(
+        (copy) =>
+          isRecord(copy) &&
+          isRecord(copy.pick) &&
+          typeof copy.pick.nodeId === "string" &&
+          typeof copy.pick.source === "string" &&
+          typeof copy.pick.tag === "string" &&
+          typeof copy.html === "string" &&
+          copy.html.length > 0 &&
+          copy.html.length <= 256 * 1024 &&
+          typeof copy.previewHtml === "string" &&
+          copy.previewHtml.length > 0 &&
+          copy.previewHtml.length <= 256 * 1024 &&
+          Array.isArray(copy.ids) &&
+          copy.ids.length > 0 &&
+          copy.ids.length <= 512 &&
+          copy.ids.every(
+            (id) =>
+              typeof id === "string" && /^putenggame-copy-[\w-]+$/.test(id),
+          ),
+      )
+    );
+  }
   if (value.kind === "putenggame:playable:media-state")
     return (
       isRecord(value.state) &&

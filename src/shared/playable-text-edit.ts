@@ -1,8 +1,22 @@
+import { annotatePlayableSourceLocations } from "./playable-source-locations.js";
+
 /** A `<file>:<line>:<column>` source location from a preview build. */
 export interface PlayableSourceLocation {
   file: string;
   line: number;
   column: number;
+}
+
+export interface PlayableElementCopySource {
+  location: Pick<PlayableSourceLocation, "line" | "column">;
+  tag: string;
+  html: string;
+  ids: string[];
+}
+
+export interface InsertedPlayableElementCopies {
+  html: string;
+  sources: Record<string, string>;
 }
 
 export function parsePlayableSourceLocation(
@@ -91,6 +105,79 @@ export function insertPlayableText(
   return { html: next, line, column: offset - lineStart + 1 };
 }
 
+/** Inserts copied surface elements beside their originals and returns fresh source locations. */
+export function insertPlayableElementCopies(
+  html: string,
+  file: string,
+  copies: readonly PlayableElementCopySource[],
+): InsertedPlayableElementCopies | undefined {
+  if (
+    !copies.length ||
+    copies.length > 32 ||
+    copies.some(
+      (copy) =>
+        !copy.ids.length ||
+        copy.ids.length > 512 ||
+        copy.html.length > 256 * 1024 ||
+        copy.ids.some((id) => !/^putenggame-copy-[\w-]+$/.test(id)),
+    )
+  )
+    return undefined;
+
+  const allIds = copies.flatMap((copy) => copy.ids);
+  if (
+    new Set(allIds).size !== allIds.length ||
+    allIds.some((id) => html.includes(id))
+  )
+    return undefined;
+
+  let next = html;
+  const ordered = copies.map((copy) => ({
+    copy,
+    start: offsetOf(html, copy.location.line, copy.location.column),
+  }));
+  if (ordered.some((item) => item.start === undefined)) return undefined;
+  ordered.sort((left, right) => right.start! - left.start!);
+  for (const item of ordered) {
+    const start = offsetOf(
+      next,
+      item.copy.location.line,
+      item.copy.location.column,
+    );
+    if (start === undefined) return undefined;
+    const range = elementRange(next, start, item.copy.tag);
+    const firstTag = /^<([A-Za-z][\w-]*)\b/.exec(item.copy.html)?.[1];
+    if (!range || firstTag?.toLowerCase() !== item.copy.tag.toLowerCase())
+      return undefined;
+    const fragment = item.copy.html.replace(
+      /\sdata-putenggame-source\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi,
+      "",
+    );
+    next = `${next.slice(0, range.end)}${fragment}${next.slice(range.end)}`;
+  }
+
+  const annotated = annotatePlayableSourceLocations(next, file);
+  const sources: Record<string, string> = {};
+  for (const id of allIds) {
+    const marker = `id="${id}"`;
+    const idOffset = annotated.indexOf(marker);
+    if (
+      idOffset < 0 ||
+      annotated.indexOf(marker, idOffset + marker.length) >= 0
+    )
+      return undefined;
+    const start = annotated.lastIndexOf("<", idOffset);
+    const end = startTagEnd(annotated, start);
+    if (start < 0 || end === undefined) return undefined;
+    const source = /\sdata-putenggame-source="([^"]+)"/i.exec(
+      annotated.slice(start, end),
+    )?.[1];
+    if (!source) return undefined;
+    sources[id] = source;
+  }
+  return { html: next, sources };
+}
+
 /** Removes the element at a source location, including its paired contents. */
 export function removePlayableElement(
   html: string,
@@ -98,14 +185,23 @@ export function removePlayableElement(
   tag: string,
 ): string | undefined {
   const start = offsetOf(html, location.line, location.column);
-  if (start === undefined || html[start] !== "<") return undefined;
+  const range =
+    start === undefined ? undefined : elementRange(html, start, tag);
+  return range ? `${html.slice(0, start!)}${html.slice(range.end)}` : undefined;
+}
+
+function elementRange(
+  html: string,
+  start: number,
+  tag: string,
+): { end: number } | undefined {
+  if (html[start] !== "<") return undefined;
   const name = /^<([A-Za-z][\w-]*)/.exec(html.slice(start))?.[1];
   if (!name || name.toLowerCase() !== tag.toLowerCase()) return undefined;
   const open = startTagEnd(html, start);
   if (open === undefined) return undefined;
   const opening = html.slice(start, open);
-  if (isVoidElement(name) || /\/\s*>$/.test(opening))
-    return `${html.slice(0, start)}${html.slice(open)}`;
+  if (isVoidElement(name) || /\/\s*>$/.test(opening)) return { end: open };
 
   let depth = 1;
   let cursor = open;
@@ -126,7 +222,7 @@ export function removePlayableElement(
     );
     if (close) {
       depth -= 1;
-      if (!depth) return `${html.slice(0, start)}${html.slice(end)}`;
+      if (!depth) return { end };
     } else if (
       new RegExp(`^<${escapeRegExp(name)}(?:\\s|>)`, "i").test(token) &&
       !/\/\s*>$/.test(token)

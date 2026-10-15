@@ -64,6 +64,7 @@ import {
 import type {
   NodePlayerDefinition,
   PlayableDeleteEdit,
+  PlayableElementCopy,
   PlayableInteractionTimingEdit,
   PlayableMove,
   PlayableTextCreate,
@@ -73,6 +74,7 @@ import type {
 } from "../shared/playable-player-protocol.js";
 import {
   parsePlayableSourceLocation,
+  insertPlayableElementCopies,
   insertPlayableText,
   removePlayableElement,
   replacePlayableElementText,
@@ -817,17 +819,24 @@ export function PlayableEditorWorkspace({
       instance.getEdges(),
       codebase.graph.entryNodeId,
     );
-    if (nodes.every((node) => {
-      const position = positions[node.id];
-      return position?.x === node.position.x && position?.y === node.position.y;
-    })) return;
+    if (
+      nodes.every((node) => {
+        const position = positions[node.id];
+        return (
+          position?.x === node.position.x && position?.y === node.position.y
+        );
+      })
+    )
+      return;
 
     beginHistoryGesture();
     redoHistory.current = [];
-    setNodes((current) => current.map((node) => ({
-      ...node,
-      position: positions[node.id] ?? node.position,
-    })));
+    setNodes((current) =>
+      current.map((node) => ({
+        ...node,
+        position: positions[node.id] ?? node.position,
+      })),
+    );
     window.requestAnimationFrame(() => {
       const fit = canvas.current?.fitView({ padding: 0.2, duration: 200 });
       if (fit) void fit.then(finishHistoryGesture, finishHistoryGesture);
@@ -1193,6 +1202,52 @@ export function PlayableEditorWorkspace({
     return `${path}:${inserted.line}:${inserted.column}`;
   }
 
+  async function writeElementCopies(
+    copies: PlayableElementCopy[],
+  ): Promise<Record<string, string> | undefined> {
+    const graph = codebase?.graph;
+    const node = graph?.nodes.find(
+      (candidate) => candidate.id === openedNodeId,
+    );
+    if (
+      !graph ||
+      !node ||
+      copies.some(
+        (copy) =>
+          copy.pick.nodeId !== node.id ||
+          !copy.pick.source ||
+          copy.pick.mediaSlot === "backdrop",
+      )
+    )
+      return undefined;
+    const source = node.source.html;
+    const file = await getWorkspaceFile(projectId, source);
+    if (file.content === undefined || file.truncated) return undefined;
+    const inserted = insertPlayableElementCopies(
+      file.content,
+      source,
+      copies.map((copy) => {
+        const location = parsePlayableSourceLocation(copy.pick.source!);
+        if (!location || location.file !== source)
+          throw new Error("素材来源已变化，请重新选择后复制。");
+        return {
+          location,
+          tag: copy.pick.tag,
+          html: copy.html,
+          ids: copy.ids,
+        };
+      }),
+    );
+    if (!inserted) throw new Error("无法复制这些素材，请确认素材仍存在。");
+    await writeSources(
+      graph,
+      { [source]: inserted.html },
+      { [source]: file.content },
+      "复制素材",
+    );
+    return inserted.sources;
+  }
+
   /** Writes a font choice made by the Text tool back to the selected element. */
   async function writeTextStyle(edit: PlayableTextStyleEdit): Promise<boolean> {
     const graph = codebase?.graph;
@@ -1309,38 +1364,64 @@ export function PlayableEditorWorkspace({
       config.characters.length > 500 ||
       !config.choices.length ||
       config.choices.length > 50 ||
-      new Set(config.characters.map((character) => character.id)).size !== config.characters.length ||
-      new Set(config.choices.map((choice) => choice.id)).size !== config.choices.length ||
-      config.characters.some((character) => character.id.length > 120 || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(character.id) || !character.name.trim() || character.name.length > 40 || !Number.isInteger(character.initial) || character.initial < 0 || character.initial > 10) ||
-      config.choices.some((choice) =>
-        choice.id.length > 120 ||
-        !/^[a-z][a-z0-9_-]*$/.test(choice.id) ||
-        !choice.label.trim() ||
-        choice.label.length > 100 ||
-        !config.characters.some((character) => character.id === choice.characterId) ||
-        !Number.isInteger(choice.delta) ||
-        choice.delta < -10 ||
-        choice.delta > 10 ||
-        !Number.isInteger(choice.threshold) ||
-        choice.threshold < 0 ||
-        choice.threshold > 10,
+      new Set(config.characters.map((character) => character.id)).size !==
+        config.characters.length ||
+      new Set(config.choices.map((choice) => choice.id)).size !==
+        config.choices.length ||
+      config.characters.some(
+        (character) =>
+          character.id.length > 120 ||
+          !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(character.id) ||
+          !character.name.trim() ||
+          character.name.length > 40 ||
+          !Number.isInteger(character.initial) ||
+          character.initial < 0 ||
+          character.initial > 10,
+      ) ||
+      config.choices.some(
+        (choice) =>
+          choice.id.length > 120 ||
+          !/^[a-z][a-z0-9_-]*$/.test(choice.id) ||
+          !choice.label.trim() ||
+          choice.label.length > 100 ||
+          !config.characters.some(
+            (character) => character.id === choice.characterId,
+          ) ||
+          !Number.isInteger(choice.delta) ||
+          choice.delta < -10 ||
+          choice.delta > 10 ||
+          !Number.isInteger(choice.threshold) ||
+          choice.threshold < 0 ||
+          choice.threshold > 10,
       )
     ) {
       throw new Error("Please check the character, choice, and value settings");
     }
     const signalIds = [...affectionSignalIds(config)];
-    if (signalIds.length !== config.choices.length * 2 || signalIds.some((id) => id.length > 120 || !/^[a-z][a-z0-9-]*$/.test(id))) {
-      throw new Error("Exit IDs must use lowercase letters, numbers, or hyphens and be unique");
+    if (
+      signalIds.length !== config.choices.length * 2 ||
+      signalIds.some((id) => id.length > 120 || !/^[a-z][a-z0-9-]*$/.test(id))
+    ) {
+      throw new Error(
+        "Exit IDs must use lowercase letters, numbers, or hyphens and be unique",
+      );
     }
     const file = await getWorkspaceFile(projectId, node.source.html);
     const before = file.truncated ? undefined : file.content;
     if (before === undefined) throw new Error("Could not read Scene source");
     const html = writePlayableAffectionConfig(before, config);
-    if (html === undefined) throw new Error("Affection settings were not found in this Scene");
+    if (html === undefined)
+      throw new Error("Affection settings were not found in this Scene");
     const labels = new Map<string, string>();
     config.choices.forEach((choice) => {
-      labels.set(choice.successSignal, `${choice.label.trim()} · Threshold met`);
-      labels.set(choice.fallbackSignal, `${choice.label.trim()} · Below threshold`);
+      labels.set(
+        choice.successSignal,
+        `${choice.label.trim()} · Threshold met`,
+      );
+      labels.set(
+        choice.fallbackSignal,
+        `${choice.label.trim()} · Below threshold`,
+      );
     });
     const next = structuredClone(graph);
     const nextNode = next.nodes.find((candidate) => candidate.id === nodeId)!;
@@ -1348,15 +1429,21 @@ export function PlayableEditorWorkspace({
       id,
       label: (labels.get(id) ?? id).slice(0, 120),
     }));
-    next.edges = next.edges.filter((edge) =>
-      edge.source.nodeId !== nodeId || labels.has(edge.source.signal),
+    next.edges = next.edges.filter(
+      (edge) => edge.source.nodeId !== nodeId || labels.has(edge.source.signal),
     );
     for (const character of config.characters) {
       next.initialState[character.id] = character.initial;
       next.variables ??= {};
-      next.variables[character.id] = `${character.name.trim()}'s affection, carried across Scenes`;
+      next.variables[character.id] =
+        `${character.name.trim()}'s affection, carried across Scenes`;
     }
-    await writeSources(next, { [node.source.html]: html }, { [node.source.html]: before }, "调整好感度规则");
+    await writeSources(
+      next,
+      { [node.source.html]: html },
+      { [node.source.html]: before },
+      "调整好感度规则",
+    );
   }
 
   /**
@@ -2247,12 +2334,15 @@ export function PlayableEditorWorkspace({
           {...(onSendToAgent ? { onSendToAgent } : {})}
           onWriteText={writeText}
           onWriteTextCreate={writeTextCreate}
+          onWriteElementCopies={writeElementCopies}
           onWriteTextStyle={writeTextStyle}
           onWriteInteractionTimings={writeInteractionTimings}
           onWriteMove={writeMove}
           onWriteTransform={writeTransform}
           onWriteDelete={writeDelete}
-          onWriteAffection={(config) => writeAffectionConfig(openedNode.id, config)}
+          onWriteAffection={(config) =>
+            writeAffectionConfig(openedNode.id, config)
+          }
           onAddAsset={async (asset) => {
             const { graph, assetId } = addPlayableNodeAsset(
               codebase.graph,

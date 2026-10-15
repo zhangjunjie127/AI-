@@ -16,6 +16,7 @@ import {
 import {
   isPlayableFrameMessage,
   isPlayableHostMessage,
+  type PlayableElementCopy,
 } from "../src/shared/playable-player-protocol.js";
 import { DocumentPlayableSurfaceHost } from "../src/shared/playable-sandbox.js";
 
@@ -451,6 +452,7 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
       onMove: () => undefined,
       onTransform: () => undefined,
       onDelete: () => undefined,
+      onPasteElements: async () => undefined,
       onCancel: () => undefined,
     });
 
@@ -625,7 +627,8 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
     const button =
       surface.shadowRoot!.querySelector<HTMLButtonElement>("button")!;
     const image = surface.shadowRoot!.querySelector<HTMLImageElement>("img")!;
-    const untimed = surface.shadowRoot!.querySelector<HTMLParagraphElement>("p")!;
+    const untimed =
+      surface.shadowRoot!.querySelector<HTMLParagraphElement>("p")!;
     Object.defineProperty(video, "currentTime", {
       configurable: true,
       writable: true,
@@ -755,6 +758,7 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
       onMove: () => undefined,
       onTransform: () => undefined,
       onDelete: () => undefined,
+      onPasteElements: async () => undefined,
       onCancel: () => undefined,
     });
 
@@ -779,6 +783,112 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
       document.querySelector<HTMLElement>('[data-playable-pick-outline="true"]')
         ?.style.display,
     ).toBe("block");
+  });
+
+  it("copies and pastes selected scene elements in place with fresh source IDs", async () => {
+    const window = new Window();
+    Object.defineProperty(window, "top", { value: {} });
+    Object.defineProperty(window, "origin", { value: "null" });
+    Object.assign(globalThis, {
+      MutationObserver: window.MutationObserver,
+      HTMLElement: window.HTMLElement,
+      Element: window.Element,
+      ShadowRoot: window.ShadowRoot,
+      Event: window.Event,
+      getComputedStyle: window.getComputedStyle.bind(window),
+    });
+    const document = window.document as unknown as Document;
+    const host = new DocumentPlayableSurfaceHost(document, async () => ({
+      mount: async () => undefined,
+    }));
+    await host.mountNode(
+      {
+        id: "choice",
+        html: '<main><button id="choice-a" data-signal="option-a" data-putenggame-source="nodes/choice/index.html:1:7"><span data-putenggame-source="nodes/choice/index.html:1:74">Choose</span></button></main>',
+        css: "",
+        javascript: "",
+        inputs: [],
+      },
+      {} as never,
+    );
+    const root = document.querySelector<HTMLElement>(
+      '[data-playable-sandbox="true"]',
+    )!;
+    const surface = document.querySelector<HTMLElement>(
+      '[data-playable-surface="choice"]',
+    )!;
+    const button =
+      surface.shadowRoot!.querySelector<HTMLButtonElement>("button")!;
+    Object.defineProperty(root, "getBoundingClientRect", {
+      value: () => ({ x: 0, y: 0, width: 640, height: 360 }),
+    });
+    Object.defineProperty(surface, "getBoundingClientRect", {
+      value: () => ({ x: 0, y: 0, width: 640, height: 360, left: 0, top: 0 }),
+    });
+    const onPasteElements = vi.fn(async (copies: PlayableElementCopy[]) =>
+      Object.fromEntries(
+        copies.flatMap((copy) =>
+          copy.ids.map((id, index) => [
+            id,
+            `nodes/choice/index.html:${index + 2}:1`,
+          ]),
+        ),
+      ),
+    );
+    host.startPicking("select", {
+      onPick: () => undefined,
+      onTextSelect: () => undefined,
+      onInteractionSelect: () => undefined,
+      onTextEdit: () => undefined,
+      onTextCreate: () => undefined,
+      onMove: () => undefined,
+      onTransform: () => undefined,
+      onDelete: () => undefined,
+      onPasteElements,
+      onCancel: () => undefined,
+    });
+
+    const down = new Event("pointerdown", { bubbles: true, composed: true });
+    Object.assign(down, {
+      button: 0,
+      pointerId: 1,
+      clientX: 20,
+      clientY: 30,
+      shiftKey: false,
+      metaKey: false,
+      ctrlKey: false,
+    });
+    button.dispatchEvent(down);
+    const up = new Event("pointerup", { bubbles: true, composed: true });
+    Object.assign(up, { button: 0, pointerId: 1, clientX: 20, clientY: 30 });
+    root.dispatchEvent(up);
+    root.dispatchEvent(new Event("click", { bubbles: true, composed: true }));
+
+    const copy = new Event("keydown", { bubbles: true, composed: true });
+    Object.assign(copy, { key: "c", ctrlKey: true, metaKey: false });
+    button.dispatchEvent(copy);
+    const paste = new Event("keydown", { bubbles: true, composed: true });
+    Object.assign(paste, { key: "v", ctrlKey: true, metaKey: false });
+    button.dispatchEvent(paste);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const buttons = surface.shadowRoot!.querySelectorAll("button");
+    expect(buttons).toHaveLength(2);
+    expect(onPasteElements).toHaveBeenCalledOnce();
+    expect(onPasteElements.mock.calls[0]![0][0]!.previewHtml).toContain(
+      'id="putenggame-copy-',
+    );
+    expect(buttons[1]!.id).toMatch(/^putenggame-copy-/);
+    expect(buttons[1]!.getAttribute("data-signal")).toBe("option-a");
+    expect(buttons[1]!.getAttribute("data-putenggame-source")).toBe(
+      "nodes/choice/index.html:2:1",
+    );
+    expect(
+      buttons[1]!.querySelector("span")!.getAttribute("data-putenggame-source"),
+    ).toBe("nodes/choice/index.html:3:1");
+
+    host.destroy();
+    window.close();
   });
 
   it("shows boxes for frame-selected buttons, text, images, foreground video, and QTE", async () => {
@@ -863,6 +973,7 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
       onMove: () => undefined,
       onTransform: () => undefined,
       onDelete: () => undefined,
+      onPasteElements: async () => undefined,
       onCancel: () => undefined,
     });
 

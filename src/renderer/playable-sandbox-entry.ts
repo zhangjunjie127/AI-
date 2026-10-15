@@ -2,6 +2,7 @@ import {
   isPlayableHostMessage,
   type PlayableFrameMessage,
   type PlayableHostMessage,
+  type PlayableElementCopy,
   type PlayablePreviewTool,
 } from "../shared/playable-player-protocol.js";
 import {
@@ -15,6 +16,14 @@ import { DocumentPlayableSurfaceHost } from "../shared/playable-sandbox.js";
 import { translateSandboxTextNodes } from "./playable-sandbox-language.js";
 
 let session: SandboxSession | undefined;
+let nextElementPasteRequest = 0;
+const pendingElementPaste = new Map<
+  string,
+  {
+    resolve: (sources: Record<string, string> | undefined) => void;
+    reject: (error: Error) => void;
+  }
+>();
 
 window.addEventListener("message", (event: MessageEvent<unknown>) => {
   if (event.source !== window.parent || !isPlayableHostMessage(event.data))
@@ -30,6 +39,14 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
   if (event.data.kind === "putenggame:playable:text-created-result") {
     if (session?.instanceId === event.data.instanceId)
       session.host.setTextSource(event.data.id, event.data.source);
+    return;
+  }
+  if (event.data.kind === "putenggame:playable:element-paste-result") {
+    const pending = pendingElementPaste.get(event.data.requestId);
+    if (!pending) return;
+    pendingElementPaste.delete(event.data.requestId);
+    if (event.data.error) pending.reject(new Error(event.data.error));
+    else pending.resolve(event.data.sources);
     return;
   }
   if (event.data.kind === "putenggame:playable:media-command") {
@@ -165,6 +182,17 @@ function startPicking(instanceId: string, tool: PlayablePreviewTool): void {
       post({ kind: "putenggame:playable:transformed", instanceId, edit }),
     onDelete: (edit) =>
       post({ kind: "putenggame:playable:deleted", instanceId, edit }),
+    onPasteElements: (copies: PlayableElementCopy[]) =>
+      new Promise((resolve, reject) => {
+        const requestId = String(++nextElementPasteRequest);
+        pendingElementPaste.set(requestId, { resolve, reject });
+        post({
+          kind: "putenggame:playable:element-paste",
+          instanceId,
+          requestId,
+          copies,
+        });
+      }),
     onCancel: () =>
       post({ kind: "putenggame:playable:pick-cancelled", instanceId }),
   });
@@ -178,6 +206,9 @@ async function disposeSession(): Promise<void> {
   current.disposeLanguage();
   await current.runtime.dispose();
   current.host.destroy();
+  for (const pending of pendingElementPaste.values())
+    pending.reject(new Error("The preview closed before paste completed."));
+  pendingElementPaste.clear();
   for (const url of Object.values(current.assetUrls)) URL.revokeObjectURL(url);
 }
 

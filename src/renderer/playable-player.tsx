@@ -10,6 +10,7 @@ import type {
   PlayableAssetTransfer,
   PlayableAppearanceTimingCommand,
   PlayableDeleteEdit,
+  PlayableElementCopy,
   PlayableFrameMessage,
   PlayableMediaCommand,
   PlayableMediaState,
@@ -61,6 +62,9 @@ export interface NodePlayerProps {
   onMove?: (move: PlayableMove) => void;
   onTransform?: (edit: PlayableTransformEdit) => void;
   onDelete?: (edit: PlayableDeleteEdit) => void;
+  onPasteElements?: (
+    copies: PlayableElementCopy[],
+  ) => Promise<Record<string, string> | undefined>;
   onMediaState?: (state: PlayableMediaState) => void;
   /** Keeps the authoring preview's media position across source updates. */
   preserveMediaState?: PlayableMediaState;
@@ -96,6 +100,7 @@ export function NodePlayer({
   onMove,
   onTransform,
   onDelete,
+  onPasteElements,
   onMediaState,
   preserveMediaState,
   backdropEffects,
@@ -180,6 +185,30 @@ export function NodePlayer({
         onTransform?.(message.edit);
       } else if (message.kind === "putenggame:playable:deleted") {
         onDelete?.(message.edit);
+      } else if (message.kind === "putenggame:playable:element-paste") {
+        void Promise.resolve(onPasteElements?.(message.copies))
+          .then((sources) =>
+            iframe.current?.contentWindow?.postMessage(
+              {
+                kind: "putenggame:playable:element-paste-result",
+                instanceId,
+                requestId: message.requestId,
+                ...(sources ? { sources } : { error: "无法粘贴这些素材" }),
+              },
+              "*",
+            ),
+          )
+          .catch((cause) =>
+            iframe.current?.contentWindow?.postMessage(
+              {
+                kind: "putenggame:playable:element-paste-result",
+                instanceId,
+                requestId: message.requestId,
+                error: errorMessage(cause),
+              },
+              "*",
+            ),
+          );
       } else if (message.kind === "putenggame:playable:media-state") {
         onMediaState?.(message.state);
       } else if (message.kind === "putenggame:playable:pick-cancelled") {
@@ -201,6 +230,7 @@ export function NodePlayer({
     onMove,
     onTransform,
     onDelete,
+    onPasteElements,
     onMediaState,
     onPickCancel,
     onSnapshot,

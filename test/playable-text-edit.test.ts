@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  insertPlayableElementCopies,
   insertPlayableText,
+  offsetOf,
   parsePlayableSourceLocation,
   removePlayableElement,
   replacePlayableElementText,
@@ -146,6 +148,66 @@ describe("insertPlayableText", () => {
     ).toBeUndefined();
     expect(
       insertPlayableText("<main></main>", { ...edit, text: " " }),
+    ).toBeUndefined();
+  });
+});
+
+describe("insertPlayableElementCopies", () => {
+  it("duplicates nested markup and returns source locations for every new element", () => {
+    const before = [
+      "<main>",
+      '  <button id="choice-a" data-signal="option-a" style="--putenggame-appear-at: 4s">',
+      "    <span>Choose</span>",
+      "  </button>",
+      "</main>",
+    ].join("\n");
+    const inserted = insertPlayableElementCopies(
+      before,
+      "nodes/scene/index.html",
+      [
+        {
+          location: { line: 2, column: 3 },
+          tag: "button",
+          html: '<button id="putenggame-copy-1" data-signal="option-a" style="--putenggame-appear-at: 4s"><span id="putenggame-copy-2">Choose</span></button>',
+          ids: ["putenggame-copy-1", "putenggame-copy-2"],
+        },
+      ],
+    )!;
+
+    expect(inserted.html).toContain(
+      '<button id="putenggame-copy-1" data-signal="option-a" style="--putenggame-appear-at: 4s"><span id="putenggame-copy-2">Choose</span></button>',
+    );
+    for (const id of ["putenggame-copy-1", "putenggame-copy-2"]) {
+      const location = parsePlayableSourceLocation(inserted.sources[id]!);
+      expect(location?.file).toBe("nodes/scene/index.html");
+      expect(
+        inserted.html.slice(
+          offsetOf(inserted.html, location!.line, location!.column)!,
+        ),
+      ).toMatch(new RegExp(`^<\\w+[^>]*id="${id}"`));
+    }
+  });
+
+  it("rejects stale source positions and reused generated IDs", () => {
+    const copy = {
+      location: { line: 20, column: 1 },
+      tag: "button",
+      html: '<button id="putenggame-copy-stale"></button>',
+      ids: ["putenggame-copy-stale"],
+    };
+    expect(
+      insertPlayableElementCopies(
+        "<main><button>Go</button></main>",
+        "nodes/a/index.html",
+        [copy],
+      ),
+    ).toBeUndefined();
+    expect(
+      insertPlayableElementCopies(
+        '<main><button id="putenggame-copy-stale"></button></main>',
+        "nodes/a/index.html",
+        [{ ...copy, location: { line: 1, column: 7 } }],
+      ),
     ).toBeUndefined();
   });
 });

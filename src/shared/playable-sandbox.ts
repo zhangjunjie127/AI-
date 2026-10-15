@@ -19,6 +19,7 @@ import {
 } from "./playable-move.js";
 import type {
   PlayableDeleteEdit,
+  PlayableElementCopy,
   PlayableMove,
   PlayablePreviewTool,
   PlayableTextEdit,
@@ -160,6 +161,9 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       onMove: (move: PlayableMove) => void;
       onTransform: (edit: PlayableTransformEdit) => void;
       onDelete: (edit: PlayableDeleteEdit) => void;
+      onPasteElements: (
+        copies: PlayableElementCopy[],
+      ) => Promise<Record<string, string> | undefined>;
       onCancel: () => void;
     },
   ): void {
@@ -205,6 +209,8 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
     let marqueeDrag: MarqueeDrag | undefined;
     let pendingClickPath: readonly EventTarget[] | undefined;
     let textSequence = 0;
+    let copySequence = 0;
+    let copiedElements: SelectedElement[] = [];
 
     const inside = (event: Event) =>
       Boolean(editing && event.composedPath().includes(editing.element));
@@ -706,6 +712,143 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         inPlace: Boolean(current.pick.source),
       });
     };
+    const copySelected = () => {
+      if (tool !== "select" || !selectedElements.length) return;
+      if (
+        selectedElements.some(
+          ({ pick }) => !pick.source || pick.mediaSlot === "backdrop",
+        )
+      ) {
+        copiedElements = [];
+        return;
+      }
+      copiedElements = [...selectedElements];
+    };
+    const pasteCopied = async () => {
+      if (
+        tool !== "select" ||
+        !copiedElements.length ||
+        copiedElements.length > 32
+      )
+        return;
+      const copies: PlayableElementCopy[] = copiedElements.map(
+        ({ element, pick }) => {
+          const clone = element.cloneNode(true) as HTMLElement;
+          const subtree = [
+            clone,
+            ...Array.from(clone.querySelectorAll<HTMLElement>("*")),
+          ];
+          const idMap = new Map<string, string>();
+          const ids = subtree.map((target) => {
+            const oldId = target.id;
+            const id = `putenggame-copy-${Date.now()}-${++copySequence}`;
+            if (oldId) idMap.set(oldId, id);
+            target.id = id;
+            target.removeAttribute(PLAYABLE_SOURCE_ATTRIBUTE);
+            target.removeAttribute("contenteditable");
+            target.removeAttribute("data-playable-timing-hidden");
+            return id;
+          });
+          for (const target of subtree) {
+            for (const attribute of Array.from(target.attributes)) {
+              const name = attribute.name.toLowerCase();
+              const rewritten = [
+                "for",
+                "headers",
+                "list",
+                "aria-labelledby",
+                "aria-describedby",
+                "aria-controls",
+                "aria-owns",
+                "aria-flowto",
+                "aria-details",
+                "aria-errormessage",
+              ].includes(name)
+                ? attribute.value.replace(
+                    /[A-Za-z][\w-]*/g,
+                    (id) => idMap.get(id) ?? id,
+                  )
+                : name === "href" || name === "xlink:href"
+                  ? attribute.value.replace(
+                      /^#([A-Za-z][\w-]*)$/,
+                      (match, id: string) =>
+                        idMap.has(id) ? `#${idMap.get(id)}` : match,
+                    )
+                  : attribute.value.replace(
+                      /url\(#([A-Za-z][\w-]*)\)/g,
+                      (match, id: string) =>
+                        idMap.has(id) ? `url(#${idMap.get(id)})` : match,
+                    );
+              if (rewritten !== attribute.value)
+                target.setAttribute(attribute.name, rewritten);
+            }
+          }
+          const [translateX = "0px", translateY = "0px"] =
+            view.getComputedStyle(element).translate === "none"
+              ? []
+              : view.getComputedStyle(element).translate.split(/\s+/);
+          clone.style.translate = `calc(${translateX} + 2cqw) calc(${translateY} + 2cqh)`;
+          const previewHtml = clone.outerHTML;
+          const sourceClone = clone.cloneNode(true) as HTMLElement;
+          for (const target of [
+            sourceClone,
+            ...Array.from(sourceClone.querySelectorAll<HTMLElement>("*")),
+          ]) {
+            if (target.getAttribute("src")?.startsWith("blob:"))
+              target.removeAttribute("src");
+          }
+          return { pick, html: sourceClone.outerHTML, previewHtml, ids };
+        },
+      );
+      if (
+        copies.some(
+          (copy) =>
+            copy.html.length > 256 * 1024 ||
+            copy.previewHtml.length > 256 * 1024,
+        ) ||
+        copies.reduce(
+          (size, copy) => size + copy.html.length + copy.previewHtml.length,
+          0,
+        ) >
+          2 * 1024 * 1024
+      )
+        return;
+      const sources = await handlers.onPasteElements(copies);
+      if (!sources) return;
+
+      const pasted: SelectedElement[] = [];
+      for (let index = 0; index < copies.length; index += 1) {
+        const copy = copies[index]!;
+        const original = copiedElements[index]!;
+        if (!original.element.isConnected) continue;
+        const template = this.#document.createElement("template");
+        template.innerHTML = copy.previewHtml;
+        const clone = template.content.firstElementChild as HTMLElement | null;
+        if (!clone) continue;
+        for (const id of copy.ids) {
+          const source = sources[id];
+          const target =
+            clone.id === id
+              ? clone
+              : clone.querySelector<HTMLElement>(`#${id}`);
+          if (target && source)
+            target.setAttribute(PLAYABLE_SOURCE_ATTRIBUTE, source);
+        }
+        original.element.after(clone);
+        const pick = pickForElement(clone);
+        if (!pick?.source) continue;
+        pasted.push({ element: clone, pick });
+      }
+      if (!pasted.length) return;
+      selectedElements = pasted;
+      selected = pasted.at(-1);
+      pasted.forEach(({ element, pick }, index) => {
+        handlers.onPick(pick, index > 0);
+        const appearance = interactionForElement(element);
+        if (appearance) handlers.onInteractionSelect(appearance, index > 0);
+      });
+      placeSelected();
+    };
     const click = (event: Event) => {
       block(event);
       if (tool === "move") return;
@@ -833,6 +976,21 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         return;
       }
       block(event);
+      if (
+        tool === "select" &&
+        (keyboard.ctrlKey || keyboard.metaKey) &&
+        !keyboard.altKey
+      ) {
+        const shortcut = keyboard.key.toLowerCase();
+        if (shortcut === "c") {
+          copySelected();
+          return;
+        }
+        if (shortcut === "v") {
+          void pasteCopied().catch(() => {});
+          return;
+        }
+      }
       if (keyboard.key === "Delete" && tool === "select" && selected) {
         keyboard.preventDefault();
         deleteSelected();

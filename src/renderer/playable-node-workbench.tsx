@@ -38,6 +38,7 @@ import type {
   PlayableAppearanceTimingCommand,
   NodePlayerDefinition,
   PlayableDeleteEdit,
+  PlayableElementCopy,
   PlayableInteractionSelection,
   PlayableInteractionTimingEdit,
   PlayableMediaCommand,
@@ -179,6 +180,7 @@ export function PlayableNodeWorkbench({
   onSendToAgent,
   onWriteText,
   onWriteTextCreate,
+  onWriteElementCopies,
   onWriteTextStyle,
   onWriteInteractionTimings,
   onWriteMove,
@@ -210,6 +212,10 @@ export function PlayableNodeWorkbench({
   onWriteText: (edit: PlayableTextEdit) => Promise<boolean>;
   /** Adds a positioned text element and returns its source location. */
   onWriteTextCreate: (text: PlayableTextCreate) => Promise<string | undefined>;
+  /** Persists copied preview elements and returns each new source location. */
+  onWriteElementCopies: (
+    copies: PlayableElementCopy[],
+  ) => Promise<Record<string, string> | undefined>;
   /** Writes a font property back to the selected text element. */
   onWriteTextStyle: (edit: PlayableTextStyleEdit) => Promise<boolean>;
   /** Writes a non-video element's appearance delay back to its source element. */
@@ -262,17 +268,27 @@ export function PlayableNodeWorkbench({
     revision,
     skipNextRuntimeRefresh,
   );
-  const [affectionConfig, setAffectionConfig] = useState<PlayableAffectionConfig>();
+  const [affectionConfig, setAffectionConfig] =
+    useState<PlayableAffectionConfig>();
   const [affectionOpen, setAffectionOpen] = useState(false);
   const [affectionSaving, setAffectionSaving] = useState(false);
   useEffect(() => {
     let active = true;
-    void getWorkspaceFile(projectId, node.source.html).then((file) => {
-      if (active) setAffectionConfig(file.content ? readPlayableAffectionConfig(file.content) : undefined);
-    }).catch(() => {
-      if (active) setAffectionConfig(undefined);
-    });
-    return () => { active = false; };
+    void getWorkspaceFile(projectId, node.source.html)
+      .then((file) => {
+        if (active)
+          setAffectionConfig(
+            file.content
+              ? readPlayableAffectionConfig(file.content)
+              : undefined,
+          );
+      })
+      .catch(() => {
+        if (active) setAffectionConfig(undefined);
+      });
+    return () => {
+      active = false;
+    };
   }, [projectId, node.source.html, revision]);
   const [session, setSession] = useState(0);
   const [deleteCommand, setDeleteCommand] = useState<PlayablePickResult>();
@@ -450,6 +466,26 @@ export function PlayableNodeWorkbench({
   const onTextSelect = useCallback((selection: PlayableTextSelection) => {
     setTextSelection(selection);
   }, []);
+
+  const onPasteElements = useCallback(
+    async (copies: PlayableElementCopy[]) => {
+      const releaseRefreshSkip = reserveRuntimeRefreshSkip();
+      try {
+        const sources = await onWriteElementCopies(copies);
+        if (sources) return sources;
+        releaseRefreshSkip();
+        showToast({ tone: "error", text: "无法粘贴选中的素材" });
+      } catch (cause) {
+        releaseRefreshSkip();
+        showToast({
+          tone: "error",
+          text: `无法粘贴选中的素材：${errorMessage(cause)}`,
+        });
+      }
+      return undefined;
+    },
+    [onWriteElementCopies, reserveRuntimeRefreshSkip, showToast],
+  );
 
   const onTextCreate = useCallback(
     async (text: PlayableTextCreate) => {
@@ -890,7 +926,9 @@ export function PlayableNodeWorkbench({
           title="Affection settings"
           aria-label="Affection settings"
           onClick={() => setAffectionOpen(true)}
-        ><Heart size={14} /></button>
+        >
+          <Heart size={14} />
+        </button>
       ) : null}
       <button
         type="button"
@@ -1003,6 +1041,7 @@ export function PlayableNodeWorkbench({
           onMove={onMove}
           onTransform={onTransform}
           onDelete={onDelete}
+          onPasteElements={onPasteElements}
           onMediaState={setMediaState}
           mediaCommand={mediaCommand}
           onPickCancel={onPickCancel}
@@ -1102,7 +1141,8 @@ const TOOLS: {
 ];
 
 const TOOL_HINTS: Record<Exclude<PreviewTool, "play">, string> = {
-  select: "点击或拖动框选 · Shift 点击或框选可多选 · Esc 返回播放",
+  select:
+    "点击或拖动框选 · Shift 点击或框选可多选 · Ctrl/⌘ C 复制 · Ctrl/⌘ V 粘贴 · Esc 返回播放",
   text: "点击文本修改 · Enter 保存 · Esc 返回播放",
   move: "拖动移动 · Esc 返回播放",
   draw: "绘制后在聊天中说明需求 · Esc 返回播放",
