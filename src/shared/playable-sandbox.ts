@@ -205,6 +205,10 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
     const idleCursor =
       tool === "text" ? "text" : tool === "move" ? "grab" : "crosshair";
     this.#projectRoot.style.cursor = idleCursor;
+    const movableElements =
+      tool === "move"
+        ? new Set(selectableSourceTargets(this.#projectRoot))
+        : undefined;
     let editing: TextEditing | undefined;
     let dragging: Dragging | undefined;
     let selected: SelectedElement | undefined;
@@ -326,7 +330,11 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       }
       if (tool === "select" && selected) return placeSelected();
       if (tool === "move")
-        return place(movableTarget(event.composedPath())?.pick.box);
+        return place(
+          movableElements
+            ? movableTarget(event.composedPath(), movableElements)?.pick.box
+            : undefined,
+        );
       const pick = describePlayablePick(event.composedPath());
       const target = event.composedPath()[0];
       if (pick && tool === "select" && !pick.source) {
@@ -474,7 +482,9 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         return;
       }
       if (tool !== "move" || dragging || pointer.button !== 0) return;
-      const target = movableTarget(event.composedPath());
+      const target = movableElements
+        ? movableTarget(event.composedPath(), movableElements)
+        : undefined;
       const root = target?.element.getRootNode();
       const size =
         root instanceof ShadowRoot
@@ -1724,26 +1734,16 @@ const MOVE_THRESHOLD = 3;
  */
 function movableTarget(
   path: readonly EventTarget[],
+  selectable: ReadonlySet<HTMLElement>,
 ): { element: HTMLElement; pick: PlayablePickResult } | undefined {
-  let element = path[0] instanceof HTMLElement ? path[0] : undefined;
-  while (
-    element &&
-    ["inline", "contents"].includes(getComputedStyle(element).display)
-  )
-    element = element.parentElement ?? undefined;
-  if (
-    !element?.parentElement ||
-    element.getAttribute("data-media") === "backdrop"
-  )
-    return undefined;
-  const pick = describePlayablePick(path.slice(path.indexOf(element)));
-  const sourceTarget = describePlayableSourceTarget(path);
-  if (
-    pick?.mediaSlot === "backdrop" ||
-    sourceTarget?.pick.mediaSlot === "backdrop"
-  )
-    return undefined;
-  return pick ? { element, pick } : undefined;
+  const element = path.find(
+    (target): target is HTMLElement =>
+      target instanceof HTMLElement && selectable.has(target),
+  );
+  if (!element) return undefined;
+  const pick = pickForElement(element);
+  if (!pick || pick.mediaSlot === "backdrop") return undefined;
+  return { element, pick };
 }
 
 /**

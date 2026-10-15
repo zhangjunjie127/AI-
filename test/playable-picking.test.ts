@@ -818,6 +818,94 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
     ).toBe("block");
   });
 
+  it("moves only the individual source-backed item inside a group container", async () => {
+    const window = new Window();
+    Object.defineProperty(window, "top", { value: {} });
+    Object.defineProperty(window, "origin", { value: "null" });
+    Object.assign(globalThis, {
+      MutationObserver: window.MutationObserver,
+      HTMLElement: window.HTMLElement,
+      Element: window.Element,
+      ShadowRoot: window.ShadowRoot,
+      Event: window.Event,
+      getComputedStyle: window.getComputedStyle.bind(window),
+    });
+    const document = window.document as unknown as Document;
+    const host = new DocumentPlayableSurfaceHost(document, async () => ({
+      mount: async () => undefined,
+    }));
+    await host.mountNode(
+      {
+        id: "choice",
+        html: [
+          '<main data-putenggame-source="nodes/choice/index.html:1:1">',
+          '<div id="group" data-putenggame-source="nodes/choice/index.html:2:1">',
+          '<h1 id="title" data-putenggame-source="nodes/choice/index.html:3:1">Title</h1>',
+          '<img id="picture" data-putenggame-source="nodes/choice/index.html:4:1">',
+          '<button id="action" data-signal="next" data-putenggame-source="nodes/choice/index.html:5:1">Next</button>',
+          "</div></main>",
+        ].join(""),
+        css: "",
+        javascript: "",
+        inputs: [],
+      },
+      {} as never,
+    );
+    const root = document.querySelector<HTMLElement>(
+      '[data-playable-sandbox="true"]',
+    )!;
+    const surface = document.querySelector<HTMLElement>(
+      '[data-playable-surface="choice"]',
+    )!;
+    const group = surface.shadowRoot!.getElementById("group")!;
+    const title = surface.shadowRoot!.getElementById("title")!;
+    Object.defineProperty(root, "getBoundingClientRect", {
+      value: () => ({ x: 0, y: 0, width: 640, height: 360 }),
+    });
+    Object.defineProperty(surface, "getBoundingClientRect", {
+      value: () => ({ x: 0, y: 0, width: 640, height: 360, left: 0, top: 0 }),
+    });
+    const onMove = vi.fn();
+    host.startPicking("move", {
+      onPick: () => undefined,
+      onTextSelect: () => undefined,
+      onInteractionSelect: () => undefined,
+      onTextEdit: () => undefined,
+      onTextCreate: () => undefined,
+      onMove,
+      onTransform: () => undefined,
+      onDelete: () => undefined,
+      onPasteElements: async () => undefined,
+      onCancel: () => undefined,
+    });
+
+    const drag = (target: HTMLElement, pointerId: number) => {
+      const down = new Event("pointerdown", { bubbles: true, composed: true });
+      Object.assign(down, {
+        button: 0,
+        pointerId,
+        clientX: 10,
+        clientY: 10,
+      });
+      target.dispatchEvent(down);
+      const move = new Event("pointermove", { bubbles: true, composed: true });
+      Object.assign(move, { pointerId, clientX: 30, clientY: 30 });
+      root.dispatchEvent(move);
+      const up = new Event("pointerup", { bubbles: true, composed: true });
+      Object.assign(up, { button: 0, pointerId, clientX: 30, clientY: 30 });
+      root.dispatchEvent(up);
+    };
+
+    drag(group, 1);
+    expect(onMove).not.toHaveBeenCalled();
+    drag(title, 2);
+    expect(onMove).toHaveBeenCalledOnce();
+    expect(onMove.mock.calls[0]![0].pick.cssPath).toBe("h1#title");
+
+    host.destroy();
+    window.close();
+  });
+
   it("copies and pastes selected scene elements in place with fresh source IDs", async () => {
     const window = new Window();
     Object.defineProperty(window, "top", { value: {} });
