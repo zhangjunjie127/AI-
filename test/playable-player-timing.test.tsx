@@ -160,3 +160,52 @@ it("sends timing updates to the active frame without initializing it again", asy
   });
   expect(onApplied).toHaveBeenCalledWith(command.sequence);
 });
+
+it("forwards history shortcuts from the preview frame to the editor", async () => {
+  const onHistoryCommand = vi.fn();
+  await act(async () =>
+    root.render(
+      <NodePlayer
+        definition={definition}
+        assets={{}}
+        saveKey="preview"
+        frameUrl="about:blank"
+        storage={storage}
+        preview={preview}
+        tool="select"
+        onHistoryCommand={onHistoryCommand}
+      />,
+    ),
+  );
+  const iframe = container.querySelector("iframe")!;
+  const messages: unknown[] = [];
+  Object.defineProperty(iframe.contentWindow!, "postMessage", {
+    configurable: true,
+    value: (message: unknown) => messages.push(message),
+  });
+  await act(async () => {
+    iframe.dispatchEvent(new Event("load"));
+    await Promise.resolve();
+  });
+  const init = messages.find(
+    (message) =>
+      typeof message === "object" &&
+      message !== null &&
+      Reflect.get(message, "kind") === "putenggame:playable:init",
+  )!;
+  const instanceId = Reflect.get(init, "instanceId");
+
+  await act(async () =>
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: {
+          kind: "putenggame:playable:history-command",
+          instanceId,
+          command: "undo",
+        },
+      }),
+    ),
+  );
+
+  expect(onHistoryCommand).toHaveBeenCalledExactlyOnceWith("undo");
+});

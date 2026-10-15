@@ -199,6 +199,12 @@ function startPicking(instanceId: string, tool: PlayablePreviewTool): void {
           copies,
         });
       }),
+    onHistoryCommand: (command) =>
+      post({
+        kind: "putenggame:playable:history-command",
+        instanceId,
+        command,
+      }),
     onCancel: () =>
       post({ kind: "putenggame:playable:pick-cancelled", instanceId }),
   });

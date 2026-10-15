@@ -13,27 +13,50 @@ const codebase = createStarterCodebaseWithScene("Close save", { width: 1280, hei
 const update = vi.fn(async (_projectId: string, _next: NodeCodebaseUpdate) => ({ revision: "saved" }));
 let move!: (event: unknown, viewport: { x: number; y: number; zoom: number }) => void;
 let viewport = { x: 32, y: 64, zoom: 1.2 };
+let workbenchProps: Record<string, any> | undefined;
+let htmlSource = "<main>Original</main>";
 vi.doMock(path.resolve("src/renderer/editor-canvas.tsx"), async original => ({
   ...(await original<typeof import("../src/renderer/editor-canvas.js")>()),
-  EditorCanvas: (props: { onMoveEnd: typeof move; onInit: (instance: ReactFlowInstance) => void }) => {
+  EditorCanvas: (props: { nodes: Array<{ id: string }>; onMoveEnd: typeof move; onInit: (instance: ReactFlowInstance) => void; onNodeDoubleClick?: (event: unknown, node: { id: string }) => void }) => {
     move = props.onMoveEnd;
     useEffect(() => { props.onInit({ getViewport: () => viewport } as ReactFlowInstance); }, []);
-    return <div />;
+    return <button type="button" data-open-scene onClick={() => props.onNodeDoubleClick?.({}, props.nodes[0]!)}>Open scene</button>;
+  },
+}));
+vi.doMock(path.resolve("src/renderer/playable-node-workbench.js"), () => ({
+  PlayableNodeWorkbench: (props: Record<string, any>) => {
+    workbenchProps = props;
+    return <div>
+      <button type="button" data-paste-scene-element onClick={() => void props.onWriteElementCopies([{
+        pick: { nodeId: "start", source: "nodes/start/index.html:1:1", cssPath: "main", tag: "main", text: "Original", box: { x: 0, y: 0, width: 10, height: 10 } },
+        html: '<main id="putenggame-copy-1">Copied</main>',
+        previewHtml: '<main id="putenggame-copy-1">Copied</main>',
+        ids: ["putenggame-copy-1"],
+      }])}>Paste scene element</button>
+      <output>{props.history.map((item: { label: string }) => item.label).join("|")}</output>
+    </div>;
   },
 }));
 vi.doMock(path.resolve("src/renderer/api.ts"), async original => ({
   ...(await original<typeof import("../src/renderer/api.js")>()),
   getNodeCodebase: async () => ({ ...structuredClone(codebase), revision: "disk" }),
+  getWorkspaceFile: async (_projectId: string, file: string) => ({ path: file, content: htmlSource, truncated: false }),
   listPlayablePresets: async () => ({ presets: [] }),
   listPlayableThumbnails: async () => ({}),
   getPlayableValidation: async () => ({ issues: [] }),
+  getPlayableBackdropEffects: async () => ({ vignette: false, grain: false }),
   updateNodeCodebase: update,
 }));
 const { PlayableEditorWorkspace } = await import("../src/renderer/playable-editor-workspace.js");
 let root: ReturnType<typeof createRoot>, container: HTMLDivElement;
 beforeEach(async () => {
   vi.useFakeTimers(); vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  update.mockReset().mockResolvedValue({ revision: "saved" });
+  update.mockReset().mockImplementation(async (_projectId, next) => {
+    htmlSource = next.sources?.["nodes/start/index.html"] ?? htmlSource;
+    return { revision: "saved" };
+  });
+  htmlSource = "<main>Original</main>";
+  workbenchProps = undefined;
   viewport = { x: 32, y: 64, zoom: 1.2 };
   desktopSave.cancel();
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
@@ -82,4 +105,19 @@ it("saves the displayed viewport when close precedes the delayed move-end event"
   expect(update).toHaveBeenCalledExactlyOnceWith("p", expect.objectContaining({
     editorLayout: expect.objectContaining({ viewport }),
   }));
+});
+
+it("records a pasted scene element and undo restores only the source before that paste", async () => {
+  await act(async () => container.querySelector<HTMLButtonElement>("[data-open-scene]")!.click());
+  expect(workbenchProps).toBeDefined();
+
+  await act(async () => container.querySelector<HTMLButtonElement>("[data-paste-scene-element]")!.click());
+
+  expect(htmlSource).toContain('id="putenggame-copy-1"');
+  expect(container.querySelector("output")?.textContent).toContain("粘贴素材之前");
+
+  await act(async () => workbenchProps!.onHistoryCommand("undo"));
+
+  expect(htmlSource).toBe("<main>Original</main>");
+  expect(htmlSource).not.toContain("putenggame-copy-1");
 });

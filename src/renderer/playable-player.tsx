@@ -13,6 +13,7 @@ import type {
   PlayableElementClipboardCommand,
   PlayableElementCopy,
   PlayableFrameMessage,
+  PlayableHistoryCommand,
   PlayableMediaCommand,
   PlayableMediaState,
   PlayableMove,
@@ -66,6 +67,7 @@ export interface NodePlayerProps {
   onPasteElements?: (
     copies: PlayableElementCopy[],
   ) => Promise<Record<string, string> | undefined>;
+  onHistoryCommand?: (command: PlayableHistoryCommand) => void;
   elementClipboardCommand?: PlayableElementClipboardCommand;
   onElementClipboardCommandApplied?: (sequence: number) => void;
   onMediaState?: (state: PlayableMediaState) => void;
@@ -104,6 +106,7 @@ export function NodePlayer({
   onTransform,
   onDelete,
   onPasteElements,
+  onHistoryCommand,
   elementClipboardCommand,
   onElementClipboardCommandApplied,
   onMediaState,
@@ -214,6 +217,8 @@ export function NodePlayer({
               "*",
             ),
           );
+      } else if (message.kind === "putenggame:playable:history-command") {
+        onHistoryCommand?.(message.command);
       } else if (message.kind === "putenggame:playable:media-state") {
         onMediaState?.(message.state);
       } else if (message.kind === "putenggame:playable:pick-cancelled") {
@@ -236,6 +241,7 @@ export function NodePlayer({
     onTransform,
     onDelete,
     onPasteElements,
+    onHistoryCommand,
     onMediaState,
     onPickCancel,
     onSnapshot,

@@ -156,6 +156,8 @@ export interface PlayableElementClipboardCommand {
   sequence: number;
 }
 
+export type PlayableHistoryCommand = "undo" | "redo";
+
 export interface PlayableAssetTransfer {
   contentType: string;
   bytes: ArrayBuffer;
@@ -301,6 +303,11 @@ export type PlayableFrameMessage =
       instanceId: string;
       requestId: string;
       copies: PlayableElementCopy[];
+    }
+  | {
+      kind: "putenggame:playable:history-command";
+      instanceId: string;
+      command: PlayableHistoryCommand;
     }
   | {
       kind: "putenggame:playable:media-state";
@@ -543,6 +550,8 @@ export function isPlayableFrameMessage(
       )
     );
   }
+  if (value.kind === "putenggame:playable:history-command")
+    return value.command === "undo" || value.command === "redo";
   if (value.kind === "putenggame:playable:media-state")
     return (
       isRecord(value.state) &&

@@ -20,6 +20,7 @@ import {
 import type {
   PlayableDeleteEdit,
   PlayableElementCopy,
+  PlayableHistoryCommand,
   PlayableMove,
   PlayablePreviewTool,
   PlayableTextEdit,
@@ -166,6 +167,7 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       onPasteElements: (
         copies: PlayableElementCopy[],
       ) => Promise<Record<string, string> | undefined>;
+      onHistoryCommand?: (command: PlayableHistoryCommand) => void;
       onCancel: () => void;
     },
   ): void {
@@ -979,18 +981,27 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       }
       block(event);
       if (
-        tool === "select" &&
         (keyboard.ctrlKey || keyboard.metaKey) &&
         !keyboard.altKey
       ) {
         const shortcut = keyboard.key.toLowerCase();
-        if (shortcut === "c") {
-          copySelected();
+        if (shortcut === "z") {
+          handlers.onHistoryCommand?.(keyboard.shiftKey ? "redo" : "undo");
           return;
         }
-        if (shortcut === "v") {
-          void pasteCopied().catch(() => {});
+        if (shortcut === "y" && keyboard.ctrlKey && !keyboard.metaKey) {
+          handlers.onHistoryCommand?.("redo");
           return;
+        }
+        if (tool === "select") {
+          if (shortcut === "c") {
+            copySelected();
+            return;
+          }
+          if (shortcut === "v") {
+            void pasteCopied().catch(() => {});
+            return;
+          }
         }
       }
       if (keyboard.key === "Delete" && tool === "select" && selected) {

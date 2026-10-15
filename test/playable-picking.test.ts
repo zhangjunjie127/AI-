@@ -248,6 +248,23 @@ describe("describePlayableAppearanceTarget", () => {
 });
 
 describe("pick protocol messages", () => {
+  it("accepts valid undo/redo commands from the preview frame", () => {
+    expect(
+      isPlayableFrameMessage({
+        kind: "putenggame:playable:history-command",
+        instanceId: "preview",
+        command: "undo",
+      }),
+    ).toBe(true);
+    expect(
+      isPlayableFrameMessage({
+        kind: "putenggame:playable:history-command",
+        instanceId: "preview",
+        command: "clear",
+      }),
+    ).toBe(false);
+  });
+
   it("accepts pick messages in both directions", () => {
     expect(
       isPlayableHostMessage({
@@ -1019,6 +1036,79 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
     expect(
       document.querySelectorAll("[data-playable-pick-outline]").length,
     ).toBe(5);
+  });
+
+  it("routes undo and redo shortcuts pressed in the scene preview to its editor", async () => {
+    const window = new Window();
+    Object.defineProperty(window, "top", { value: {} });
+    Object.defineProperty(window, "origin", { value: "null" });
+    Object.assign(globalThis, {
+      MutationObserver: window.MutationObserver,
+      HTMLElement: window.HTMLElement,
+      Element: window.Element,
+      ShadowRoot: window.ShadowRoot,
+      Event: window.Event,
+      getComputedStyle: window.getComputedStyle.bind(window),
+    });
+    const document = window.document as unknown as Document;
+    const host = new DocumentPlayableSurfaceHost(document, async () => ({
+      mount: async () => undefined,
+    }));
+    await host.mountNode(
+      {
+        id: "choice",
+        html: '<main data-putenggame-source="nodes/choice/index.html:1:1"><button data-putenggame-source="nodes/choice/index.html:1:73">Choice</button></main>',
+        css: "",
+        javascript: "",
+        inputs: [],
+      },
+      {} as never,
+    );
+    const onHistoryCommand = vi.fn();
+    host.startPicking("select", {
+      onPick: () => undefined,
+      onTextSelect: () => undefined,
+      onInteractionSelect: () => undefined,
+      onTextEdit: () => undefined,
+      onTextCreate: () => undefined,
+      onMove: () => undefined,
+      onTransform: () => undefined,
+      onDelete: () => undefined,
+      onPasteElements: async () => undefined,
+      onHistoryCommand,
+      onCancel: () => undefined,
+    });
+
+    document.body.dispatchEvent(
+      new window.KeyboardEvent("keydown", {
+        bubbles: true,
+        key: "z",
+        ctrlKey: true,
+      }) as unknown as Event,
+    );
+    document.body.dispatchEvent(
+      new window.KeyboardEvent("keydown", {
+        bubbles: true,
+        key: "z",
+        ctrlKey: true,
+        shiftKey: true,
+      }) as unknown as Event,
+    );
+    document.body.dispatchEvent(
+      new window.KeyboardEvent("keydown", {
+        bubbles: true,
+        key: "y",
+        ctrlKey: true,
+      }) as unknown as Event,
+    );
+
+    expect(onHistoryCommand.mock.calls).toEqual([
+      ["undo"],
+      ["redo"],
+      ["redo"],
+    ]);
+    host.destroy();
+    window.close();
   });
 });
 

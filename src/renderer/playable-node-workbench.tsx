@@ -40,6 +40,7 @@ import type {
   PlayableDeleteEdit,
   PlayableElementClipboardCommand,
   PlayableElementCopy,
+  PlayableHistoryCommand,
   PlayableInteractionSelection,
   PlayableInteractionTimingEdit,
   PlayableMediaCommand,
@@ -182,6 +183,7 @@ export function PlayableNodeWorkbench({
   onWriteText,
   onWriteTextCreate,
   onWriteElementCopies,
+  onHistoryCommand,
   elementClipboardCommand,
   onElementClipboardCommandApplied,
   onWriteTextStyle,
@@ -219,6 +221,7 @@ export function PlayableNodeWorkbench({
   onWriteElementCopies: (
     copies: PlayableElementCopy[],
   ) => Promise<Record<string, string> | undefined>;
+  onHistoryCommand?: (command: PlayableHistoryCommand) => void;
   elementClipboardCommand?: PlayableElementClipboardCommand;
   onElementClipboardCommandApplied?: (sequence: number) => void;
   /** Writes a font property back to the selected text element. */
@@ -1047,6 +1050,7 @@ export function PlayableNodeWorkbench({
           onTransform={onTransform}
           onDelete={onDelete}
           onPasteElements={onPasteElements}
+          onHistoryCommand={onHistoryCommand}
           elementClipboardCommand={elementClipboardCommand}
           onElementClipboardCommandApplied={
             onElementClipboardCommandApplied

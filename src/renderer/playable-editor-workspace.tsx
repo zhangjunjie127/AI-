@@ -1266,7 +1266,7 @@ export function PlayableEditorWorkspace({
       graph,
       { [source]: inserted.html },
       { [source]: file.content },
-      "复制素材",
+      "粘贴素材",
     );
     return inserted.sources;
   }
@@ -2358,6 +2358,11 @@ export function PlayableEditorWorkspace({
           onWriteText={writeText}
           onWriteTextCreate={writeTextCreate}
           onWriteElementCopies={writeElementCopies}
+          onHistoryCommand={(command) => {
+            const change =
+              command === "undo" ? undoEditorChange() : redoEditorChange();
+            void change?.catch(() => {});
+          }}
           elementClipboardCommand={elementClipboardCommand}
           onElementClipboardCommandApplied={(sequence) =>
             setElementClipboardCommand((current) =>
