@@ -91,10 +91,15 @@ export function arrangePlayableNodes(
   }
 
   const depthById = new Map<string, number>();
+  const orderById = new Map<string, number>();
+  let nextOrder = 0;
   let maxDepth = -1;
   const visit = (roots: readonly string[], depth: number): number => {
     const queue = roots.filter((id) => !depthById.has(id));
-    for (const id of queue) depthById.set(id, depth);
+    for (const id of queue) {
+      depthById.set(id, depth);
+      orderById.set(id, nextOrder++);
+    }
     let componentMaxDepth = depth;
     for (let index = 0; index < queue.length; index += 1) {
       const id = queue[index]!;
@@ -103,6 +108,7 @@ export function arrangePlayableNodes(
       for (const edge of outgoing.get(id) ?? []) {
         if (depthById.has(edge.target)) continue;
         depthById.set(edge.target, nodeDepth + 1);
+        orderById.set(edge.target, nextOrder++);
         queue.push(edge.target);
       }
     }
@@ -129,6 +135,9 @@ export function arrangePlayableNodes(
   for (const node of nodes) {
     const depth = depthById.get(node.id) ?? 0;
     columns.set(depth, [...(columns.get(depth) ?? []), node]);
+  }
+  for (const column of columns.values()) {
+    column.sort((left, right) => orderById.get(left.id)! - orderById.get(right.id)!);
   }
 
   const positions: Record<string, { x: number; y: number }> = {};

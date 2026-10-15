@@ -55,13 +55,13 @@ describe("playable canvas serialization", () => {
   it("arranges branches by signal order and keeps disconnected nodes after the story", () => {
     const nodes = [
       flowNode(playableNode("start", ["first", "second"]), { x: 0, y: 0 }),
-      flowNode(playableNode("first"), { x: 0, y: 0 }),
       flowNode(playableNode("second", ["continue"]), { x: 0, y: 0 }),
+      flowNode(playableNode("first"), { x: 0, y: 0 }),
       flowNode(playableNode("ending"), { x: 0, y: 0 }),
       flowNode(playableNode("orphan"), { x: 0, y: 0 }),
     ];
     nodes[0]!.measured = { width: 200, height: 120 };
-    nodes[1]!.measured = { width: 180, height: 300 };
+    nodes[2]!.measured = { width: 180, height: 300 };
     const edges = [
       toFlowEdge({ id: "second-edge", source: { nodeId: "start", signal: "second" }, targetNodeId: "second", mode: "replace" }),
       toFlowEdge({ id: "first-edge", source: { nodeId: "start", signal: "first" }, targetNodeId: "first", mode: "replace" }),
