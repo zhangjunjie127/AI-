@@ -72,6 +72,7 @@ import type {
   NodeCodebaseDetail,
   NodeCodebaseUpdate,
 } from "../shared/playable-codebase.js";
+import type { PlayableBackdropEffects } from "../shared/playable-backdrop-effects.js";
 import type {
   PlayableAddedNode,
   PlayablePresetSummary,
@@ -795,6 +796,22 @@ export async function getNodeCodebase(
   projectId: string,
 ): Promise<NodeCodebaseDetail> {
   return request(`/projects/${projectId}/playable/codebase`);
+}
+
+export async function getPlayableBackdropEffects(
+  projectId: string,
+): Promise<PlayableBackdropEffects> {
+  return request(`/projects/${projectId}/playable/backdrop-effects`);
+}
+
+export async function updatePlayableBackdropEffects(
+  projectId: string,
+  effects: PlayableBackdropEffects,
+): Promise<PlayableBackdropEffects> {
+  return request(`/projects/${projectId}/playable/backdrop-effects`, {
+    method: "PUT",
+    body: JSON.stringify(effects),
+  });
 }
 
 export async function getPlayableValidation(

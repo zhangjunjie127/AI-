@@ -8,6 +8,7 @@ import hotspot from "./assets/templates/hotspot.webp";
 import mainMenu from "./assets/templates/main-menu.webp";
 import qte from "./assets/templates/qte.webp";
 import storyMap from "./assets/templates/story-map.webp";
+import affection from "./assets/templates/affection.webp";
 import blankZh from "./assets/templates/blank-zh.webp";
 import choiceZh from "./assets/templates/choice-zh.webp";
 import endingZh from "./assets/templates/ending-zh.webp";
@@ -15,6 +16,7 @@ import hotspotZh from "./assets/templates/hotspot-zh.webp";
 import mainMenuZh from "./assets/templates/main-menu-zh.webp";
 import qteZh from "./assets/templates/qte-zh.webp";
 import storyMapZh from "./assets/templates/story-map-zh.webp";
+import affectionZh from "./assets/templates/affection-zh.webp";
 import { useLanguage } from "./i18n.js";
 
 /**
@@ -32,6 +34,7 @@ const TEMPLATE_PICTURES: Record<string, string> = {
   "main-menu": mainMenu,
   qte,
   "story-map": storyMap,
+  affection,
 };
 
 const TEMPLATE_PICTURES_ZH: Record<string, string> = {
@@ -42,6 +45,7 @@ const TEMPLATE_PICTURES_ZH: Record<string, string> = {
   "main-menu": mainMenuZh,
   qte: qteZh,
   "story-map": storyMapZh,
+  affection: affectionZh,
 };
 
 /** Add a Scene: a grid of Templates, each with a picture and one line. */

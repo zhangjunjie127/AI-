@@ -3,6 +3,7 @@ import type { JsonObject, NodeGraph } from "./playable-nodes.js";
 import type { PlayableTransform, PlayableTranslate } from "./playable-move.js";
 import type { PlayablePickResult } from "./playable-picker.js";
 import type { PlayableSeen } from "./playable-story-map.js";
+import type { PlayableBackdropEffects } from "./playable-backdrop-effects.js";
 import type {
   NodeRuntimePolicy,
   NodeRuntimeSnapshot,
@@ -179,6 +180,11 @@ export type PlayableHostMessage =
       command: PlayableAppearanceTimingCommand;
     }
   | {
+      kind: "putenggame:playable:backdrop-effects";
+      instanceId: string;
+      effects: PlayableBackdropEffects;
+    }
+  | {
       kind: "putenggame:playable:text-created-result";
       instanceId: string;
       id: string;
@@ -330,6 +336,10 @@ export function isPlayableHostMessage(
       )
     );
   }
+  if (value.kind === "putenggame:playable:backdrop-effects")
+    return isRecord(value.effects) &&
+      typeof value.effects.vignette === "boolean" &&
+      typeof value.effects.grain === "boolean";
   if (value.kind === "putenggame:playable:media-command")
     return (
       isRecord(value.command) &&

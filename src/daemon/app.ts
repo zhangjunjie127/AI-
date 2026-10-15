@@ -87,6 +87,11 @@ import { WebSearchSettingsStore } from "./web-search-settings.js";
 import { WebSearchService } from "./web-search.js";
 import { buildPlayableProject, validatePlayableProject } from "./playable-project.js";
 import {
+  readPlayableBackdropEffects,
+  writePlayableBackdropEffects,
+} from "./playable-backdrop-effects.js";
+import type { PlayableBackdropEffects } from "../shared/playable-backdrop-effects.js";
+import {
   createNodeCodebase,
   createPlayableStarterCodebase,
   NodeCodebaseConflictError,
@@ -1134,6 +1139,37 @@ export function createApp(options: AppOptions = {}) {
     if (project.type !== "interactive-story") return reply.code(409).send({ error: "Playable codebases require an Interactive Story project" });
     try {
       return await openNodeCodebaseDetail(project.workspacePath);
+    } catch (cause) {
+      return reply.code(400).send({ error: cause instanceof Error ? cause.message : String(cause) });
+    }
+  });
+
+  app.get<{ Params: { projectId: string } }>("/projects/:projectId/playable/backdrop-effects", async (request, reply) => {
+    const project = projects.get(request.params.projectId);
+    if (!project) return reply.code(404).send({ error: "Project not found" });
+    if (project.type !== "interactive-story") return reply.code(409).send({ error: "Backdrop effects require an Interactive Story project" });
+    try {
+      return await readPlayableBackdropEffects(project.workspacePath);
+    } catch (cause) {
+      return reply.code(400).send({ error: cause instanceof Error ? cause.message : String(cause) });
+    }
+  });
+
+  app.put<{ Params: { projectId: string }; Body: PlayableBackdropEffects }>("/projects/:projectId/playable/backdrop-effects", {
+    schema: { body: { type: "object" } },
+  }, async (request, reply) => {
+    const project = projects.get(request.params.projectId);
+    if (!project) return reply.code(404).send({ error: "Project not found" });
+    if (project.type !== "interactive-story") return reply.code(409).send({ error: "Backdrop effects require an Interactive Story project" });
+    const { vignette, grain } = request.body ?? {};
+    if (typeof vignette !== "boolean" || typeof grain !== "boolean") {
+      return reply.code(400).send({ error: "Backdrop effects must include boolean vignette and grain values" });
+    }
+    try {
+      const effects = { vignette, grain };
+      await writePlayableBackdropEffects(project.workspacePath, effects);
+      await projects.touch(project.id);
+      return effects;
     } catch (cause) {
       return reply.code(400).send({ error: cause instanceof Error ? cause.message : String(cause) });
     }

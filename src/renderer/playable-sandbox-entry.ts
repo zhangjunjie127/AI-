@@ -47,6 +47,11 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
       session.host.updateAppearanceTiming(event.data.command.updates);
     return;
   }
+  if (event.data.kind === "putenggame:playable:backdrop-effects") {
+    if (session?.instanceId === event.data.instanceId)
+      session.host.setBackdropEffects(event.data.effects);
+    return;
+  }
   if (event.data.kind === "putenggame:playable:pick-cancel") {
     if (session?.instanceId === event.data.instanceId)
       session.host.stopPicking();

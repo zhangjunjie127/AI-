@@ -172,6 +172,7 @@ export {
   FolderOpenIcon as FolderOpen,
   GamepadIcon as Gamepad2,
   GlobalIcon as Globe2,
+  HeartIcon as Heart,
   GalleryIcon as Image,
   GalleryRemoveIcon as ImageOff,
   VideoFrameIcon as Film,

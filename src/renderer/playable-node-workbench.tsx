@@ -14,6 +14,7 @@ import {
   ImageOff,
   InfoCircle,
   History,
+  Heart,
   LoaderCircle,
   MessageSquarePlus,
   MousePointer2,
@@ -49,6 +50,7 @@ import type {
   PlayableTextStyleEdit,
   PlayableTransformEdit,
 } from "../shared/playable-player-protocol.js";
+import type { PlayableBackdropEffects } from "../shared/playable-backdrop-effects.js";
 import {
   playableTextPickWithSource,
   type PlayablePickResult,
@@ -65,7 +67,7 @@ import {
   playableRuntimeKey,
   type PlayableProjectValidationIssue,
 } from "../shared/playable-editor.js";
-import { getNodeRuntime, playableSandboxUrl } from "./api.js";
+import { getNodeRuntime, getWorkspaceFile, playableSandboxUrl } from "./api.js";
 import { loadLibraryAssets, type LibraryAsset } from "./library-assets.js";
 import {
   LibraryAssetPicker,
@@ -83,6 +85,11 @@ import {
   type PlayableStroke,
 } from "./playable-chat.js";
 import { isTextEntry } from "./editor-canvas.js";
+import { PlayableAffectionDialog } from "./playable-affection-dialog.js";
+import {
+  readPlayableAffectionConfig,
+  type PlayableAffectionConfig,
+} from "../shared/playable-affection.js";
 
 const ASSET_UPLOAD_ACCEPT = ".png,.jpg,.jpeg,.webp,.mp4,.mov,.webm";
 const TOAST_LIMIT = 3;
@@ -177,10 +184,12 @@ export function PlayableNodeWorkbench({
   onWriteMove,
   onWriteTransform,
   onWriteDelete,
+  onWriteAffection,
   onAddAsset,
   onSetBackdrop,
   onRemoveBackdrop,
   backdrop,
+  backdropEffects,
   onPlayFromHere,
   onChatContextChange,
 }: {
@@ -213,6 +222,7 @@ export function PlayableNodeWorkbench({
   onWriteTransform: (edit: PlayableTransformEdit) => Promise<boolean>;
   /** Removes a selected element from surface HTML. */
   onWriteDelete: (edit: PlayableDeleteEdit) => Promise<boolean>;
+  onWriteAffection: (config: PlayableAffectionConfig) => Promise<void>;
   /** Declares an asset on the Scene and resolves with its ID once saved. */
   onAddAsset: (asset: PlayableAssetRequest) => Promise<string>;
   /**
@@ -227,6 +237,7 @@ export function PlayableNodeWorkbench({
   onRemoveBackdrop?: () => Promise<boolean>;
   /** Whether the Scene's background shows anything yet; unset when the editor cannot set it. */
   backdrop?: "missing" | "set";
+  backdropEffects: PlayableBackdropEffects;
   /** Opens a Playtest that starts at this Scene. */
   onPlayFromHere?: (start: PlaytestStart) => void;
   onChatContextChange?: (state: PlayableChatState | undefined) => void;
@@ -251,6 +262,18 @@ export function PlayableNodeWorkbench({
     revision,
     skipNextRuntimeRefresh,
   );
+  const [affectionConfig, setAffectionConfig] = useState<PlayableAffectionConfig>();
+  const [affectionOpen, setAffectionOpen] = useState(false);
+  const [affectionSaving, setAffectionSaving] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void getWorkspaceFile(projectId, node.source.html).then((file) => {
+      if (active) setAffectionConfig(file.content ? readPlayableAffectionConfig(file.content) : undefined);
+    }).catch(() => {
+      if (active) setAffectionConfig(undefined);
+    });
+    return () => { active = false; };
+  }, [projectId, node.source.html, revision]);
   const [session, setSession] = useState(0);
   const [deleteCommand, setDeleteCommand] = useState<PlayablePickResult>();
   const [appearanceTimingCommand, setAppearanceTimingCommand] =
@@ -860,6 +883,15 @@ export function PlayableNodeWorkbench({
           </div>
         ) : null}
       </div>
+      {affectionConfig ? (
+        <button
+          type="button"
+          className="icon-button pane-header-action"
+          title="Affection settings"
+          aria-label="Affection settings"
+          onClick={() => setAffectionOpen(true)}
+        ><Heart size={14} /></button>
+      ) : null}
       <button
         type="button"
         className="icon-button pane-header-action"
@@ -952,6 +984,7 @@ export function PlayableNodeWorkbench({
           storage={storage}
           preview={preview}
           preserveMediaState={mediaState}
+          backdropEffects={backdropEffects}
           deleteCommand={deleteCommand}
           appearanceTimingCommand={appearanceTimingCommand}
           onAppearanceTimingCommandApplied={(sequence) =>
@@ -1015,6 +1048,22 @@ export function PlayableNodeWorkbench({
           <div className="story-node-workbench-preview">{previewPane}</div>
         </div>
       </div>
+      {affectionOpen && affectionConfig ? (
+        <PlayableAffectionDialog
+          config={affectionConfig}
+          busy={affectionSaving}
+          onSave={async (config) => {
+            setAffectionSaving(true);
+            try {
+              await onWriteAffection(config);
+              setAffectionConfig(config);
+            } finally {
+              setAffectionSaving(false);
+            }
+          }}
+          onClose={() => setAffectionOpen(false)}
+        />
+      ) : null}
     </section>
   );
 }

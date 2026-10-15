@@ -5370,10 +5370,60 @@ button.home-nav-item-active:hover {
 }
 .project-settings-project {
   display: grid;
-  gap: 5px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.project-settings-project > strong {
+  text-align: right;
 }
 .project-settings-dialog:has(.project-run-settings) {
   width: min(500px, 100%);
+}
+.project-settings-dialog:has(.playable-affection-form) {
+  width: min(620px, 100%);
+}
+.playable-affection-form {
+  max-height: calc(100dvh - 92px);
+  overflow-y: auto;
+}
+.playable-affection-form .project-settings-section {
+  padding-block: 4px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.playable-affection-form .project-settings-section-heading {
+  justify-content: space-between;
+}
+.playable-affection-form .project-settings-section-heading > strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.playable-affection-row,
+.playable-affection-numbers {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(100px, 0.45fr) 28px;
+  align-items: end;
+  gap: 8px;
+}
+.playable-affection-choice {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius);
+  background: var(--control-surface);
+}
+.playable-affection-choice > .playable-affection-numbers:last-child {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.playable-affection-row .icon-button,
+.playable-affection-numbers .icon-button {
+  width: 28px;
+  height: 32px;
+}
+.playable-affection-form :is(input, select) {
+  min-width: 0;
+  width: 100%;
 }
 .project-settings-dialog .project-run-settings {
   gap: 16px;
@@ -5513,6 +5563,43 @@ button.home-nav-item-active:hover {
   color: var(--text-muted);
   font-size: 11px;
   line-height: 1.5;
+}
+.playable-backdrop-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.playable-backdrop-option {
+  display: flex !important;
+  min-width: 0;
+  min-height: 36px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px !important;
+  padding: 0 10px;
+  border-radius: var(--radius);
+  background: var(--control-surface);
+  color: var(--text) !important;
+  cursor: pointer;
+}
+.project-settings-dialog .playable-backdrop-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--theme-accent);
+  cursor: pointer;
+}
+.playable-backdrop-option:focus-within {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: 2px;
+}
+.playable-variables-content {
+  padding: 2px 0 4px;
+}
+.playable-variables-content .project-settings-section-heading {
+  justify-content: flex-end;
 }
 .project-settings-preview-toggle {
   display: flex;

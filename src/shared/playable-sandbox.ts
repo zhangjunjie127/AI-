@@ -30,6 +30,11 @@ import type {
   PlayableMediaState,
   PlayableTransformEdit,
 } from "./playable-player-protocol.js";
+import {
+  PLAYABLE_BACKDROP_GRAIN_VARIABLE,
+  PLAYABLE_BACKDROP_VIGNETTE_VARIABLE,
+  type PlayableBackdropEffects,
+} from "./playable-backdrop-effects.js";
 import { PLAYABLE_SOURCE_ATTRIBUTE } from "./playable-source-locations.js";
 import type {
   PlayableMountedSurface,
@@ -60,6 +65,7 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
   #mediaObservers: MutationObserver[] = [];
   #surfaceStartedAt = new WeakMap<HTMLElement, number>();
   #timingTimer?: number;
+  #backdropEffects?: PlayableBackdropEffects;
 
   constructor(
     document: Document,
@@ -107,6 +113,15 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       return;
     }
     void video.play().catch(() => this.#emitMediaState(video));
+  }
+
+  setBackdropEffects(effects: PlayableBackdropEffects): void {
+    this.#backdropEffects = { ...effects };
+    for (const host of this.#projectRoot.querySelectorAll<HTMLElement>(
+      "[data-playable-surface]",
+    )) {
+      this.#applyBackdropEffects(host, effects);
+    }
   }
 
   destroy(): void {
@@ -972,6 +987,8 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
     const template = this.#document.createElement("template");
     template.innerHTML = surface.html;
     root.append(style, template.content.cloneNode(true));
+    if (this.#backdropEffects)
+      this.#applyBackdropEffects(host, this.#backdropEffects);
     for (const element of root.querySelectorAll<HTMLElement>(
       "[style*='--putenggame-appear-at'], [style*='--putenggame-disappear-at']",
     ))
@@ -999,6 +1016,23 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       host.remove();
       throw cause;
     }
+  }
+
+  #applyBackdropEffects(
+    host: HTMLElement,
+    effects: PlayableBackdropEffects,
+  ): void {
+    const root = host.shadowRoot;
+    if (!root) return;
+    let style = root.querySelector<HTMLStyleElement>(
+      "style[data-playable-backdrop-effects]",
+    );
+    if (!style) {
+      style = this.#document.createElement("style");
+      style.dataset.playableBackdropEffects = "true";
+      root.append(style);
+    }
+    style.textContent = `:host {\n  ${PLAYABLE_BACKDROP_VIGNETTE_VARIABLE}: ${effects.vignette ? `var(${PLAYABLE_BACKDROP_VIGNETTE_VARIABLE}-source)` : "none"};\n  ${PLAYABLE_BACKDROP_GRAIN_VARIABLE}: ${effects.grain ? `var(${PLAYABLE_BACKDROP_GRAIN_VARIABLE}-source)` : "none"};\n}`;
   }
 
   #observeMedia(root: ShadowRoot): void {

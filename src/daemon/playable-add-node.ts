@@ -92,6 +92,18 @@ export async function addPlayableNode(
     // The first Node of an empty project becomes its Start.
     const graph = withPlayableEntry({
       ...codebase.graph,
+      initialState: {
+        ...preset.initialState,
+        ...codebase.graph.initialState,
+      },
+      ...(preset.variables || codebase.graph.variables
+        ? {
+            variables: {
+              ...preset.variables,
+              ...codebase.graph.variables,
+            },
+          }
+        : {}),
       nodes: [
         ...codebase.graph.nodes,
         {

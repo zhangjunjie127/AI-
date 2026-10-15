@@ -38,6 +38,11 @@ import {
 } from "./editor-canvas.js";
 import type { ProjectState, PromptContext } from "../shared/contracts.js";
 import {
+  affectionSignalIds,
+  writePlayableAffectionConfig,
+  type PlayableAffectionConfig,
+} from "../shared/playable-affection.js";
+import {
   rebasePlayableCodebase,
   samePlayableGraph,
   type NodeCodebase,
@@ -92,11 +97,13 @@ import {
   ApiError,
   buildInteractiveStory,
   getNodeCodebase,
+  getPlayableBackdropEffects,
   getPlayableValidation,
   getWorkspaceFile,
   listPlayablePresets,
   listPlayableThumbnails,
   updateNodeCodebase,
+  updatePlayableBackdropEffects,
 } from "./api.js";
 import { PublishDialog, type PublishDetails } from "./publish-dialog.js";
 import { WorkspaceCodeView } from "./coding-workspace.js";
@@ -111,6 +118,10 @@ import { PlayableEdge } from "./playable-edge.js";
 import { PlayableProjectSettingsDialog } from "./playable-project-settings-dialog.js";
 import { requestPlaytestStart } from "./playable-playtest.js";
 import type { PlayableChatState } from "./playable-chat.js";
+import {
+  DEFAULT_PLAYABLE_BACKDROP_EFFECTS,
+  type PlayableBackdropEffects,
+} from "../shared/playable-backdrop-effects.js";
 import {
   buildCodebase,
   createFlowNode,
@@ -265,6 +276,8 @@ export function PlayableEditorWorkspace({
       : undefined;
   const [thumbnails, setThumbnails] = useState<PlayableThumbnailManifest>();
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
+  const [backdropEffects, setBackdropEffects] =
+    useState<PlayableBackdropEffects>(DEFAULT_PLAYABLE_BACKDROP_EFFECTS);
   const [building, setBuilding] = useState(false);
   const [playtesting, setPlaytesting] = useState(false);
   const [writing, setWriting] = useState(false);
@@ -396,13 +409,15 @@ export function PlayableEditorWorkspace({
     setCopiedSelection(undefined);
     void Promise.all([
       getNodeCodebase(projectId),
+      getPlayableBackdropEffects(projectId),
       listPlayablePresets().catch(() => ({
         presets: [] as PlayablePresetSummary[],
       })),
     ])
-      .then(([loaded, catalog]) => {
+      .then(([loaded, effects, catalog]) => {
         if (disposed) return;
         applyCodebase(loaded, { diskRevision: loaded.revision });
+        setBackdropEffects(effects);
         setPresets(catalog.presets);
         setPhase("ready");
       })
@@ -1280,6 +1295,68 @@ export function PlayableEditorWorkspace({
     }
     await writeSources(graph, sources, before, "调整素材时间");
     return true;
+  }
+
+  async function writeAffectionConfig(
+    nodeId: string,
+    config: PlayableAffectionConfig,
+  ): Promise<void> {
+    const graph = codebase?.graph;
+    const node = graph?.nodes.find((candidate) => candidate.id === nodeId);
+    if (!graph || !node) throw new Error("Scene no longer exists");
+    if (
+      !config.characters.length ||
+      config.characters.length > 500 ||
+      !config.choices.length ||
+      config.choices.length > 50 ||
+      new Set(config.characters.map((character) => character.id)).size !== config.characters.length ||
+      new Set(config.choices.map((choice) => choice.id)).size !== config.choices.length ||
+      config.characters.some((character) => character.id.length > 120 || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(character.id) || !character.name.trim() || character.name.length > 40 || !Number.isInteger(character.initial) || character.initial < 0 || character.initial > 10) ||
+      config.choices.some((choice) =>
+        choice.id.length > 120 ||
+        !/^[a-z][a-z0-9_-]*$/.test(choice.id) ||
+        !choice.label.trim() ||
+        choice.label.length > 100 ||
+        !config.characters.some((character) => character.id === choice.characterId) ||
+        !Number.isInteger(choice.delta) ||
+        choice.delta < -10 ||
+        choice.delta > 10 ||
+        !Number.isInteger(choice.threshold) ||
+        choice.threshold < 0 ||
+        choice.threshold > 10,
+      )
+    ) {
+      throw new Error("Please check the character, choice, and value settings");
+    }
+    const signalIds = [...affectionSignalIds(config)];
+    if (signalIds.length !== config.choices.length * 2 || signalIds.some((id) => id.length > 120 || !/^[a-z][a-z0-9-]*$/.test(id))) {
+      throw new Error("Exit IDs must use lowercase letters, numbers, or hyphens and be unique");
+    }
+    const file = await getWorkspaceFile(projectId, node.source.html);
+    const before = file.truncated ? undefined : file.content;
+    if (before === undefined) throw new Error("Could not read Scene source");
+    const html = writePlayableAffectionConfig(before, config);
+    if (html === undefined) throw new Error("Affection settings were not found in this Scene");
+    const labels = new Map<string, string>();
+    config.choices.forEach((choice) => {
+      labels.set(choice.successSignal, `${choice.label.trim()} · Threshold met`);
+      labels.set(choice.fallbackSignal, `${choice.label.trim()} · Below threshold`);
+    });
+    const next = structuredClone(graph);
+    const nextNode = next.nodes.find((candidate) => candidate.id === nodeId)!;
+    nextNode.signals = signalIds.map((id) => ({
+      id,
+      label: (labels.get(id) ?? id).slice(0, 120),
+    }));
+    next.edges = next.edges.filter((edge) =>
+      edge.source.nodeId !== nodeId || labels.has(edge.source.signal),
+    );
+    for (const character of config.characters) {
+      next.initialState[character.id] = character.initial;
+      next.variables ??= {};
+      next.variables[character.id] = `${character.name.trim()}'s affection, carried across Scenes`;
+    }
+    await writeSources(next, { [node.source.html]: html }, { [node.source.html]: before }, "调整好感度规则");
   }
 
   /**
@@ -2175,6 +2252,7 @@ export function PlayableEditorWorkspace({
           onWriteMove={writeMove}
           onWriteTransform={writeTransform}
           onWriteDelete={writeDelete}
+          onWriteAffection={(config) => writeAffectionConfig(openedNode.id, config)}
           onAddAsset={async (asset) => {
             const { graph, assetId } = addPlayableNodeAsset(
               codebase.graph,
@@ -2187,6 +2265,7 @@ export function PlayableEditorWorkspace({
           onSetBackdrop={(asset) => writeBackdrop(openedNode.id, asset)}
           onRemoveBackdrop={() => removeBackdrop(openedNode.id)}
           {...(backdrop ? { backdrop } : {})}
+          backdropEffects={backdropEffects}
           onPlayFromHere={(start) => void startPlaytest(start)}
           onChatContextChange={onChatContextChange}
         />
@@ -2200,12 +2279,26 @@ export function PlayableEditorWorkspace({
         <PlayableProjectSettingsDialog
           project={project}
           graph={codebase.graph}
+          backdropEffects={backdropEffects}
           exporting={building}
           canExport={!agentBusy && !publishing && !building}
-          onSave={async (viewport) => {
-            const graph = { ...codebase.graph, viewport };
-            await save({ graph, editorLayout: codebase.editorLayout });
-            applyGraph(graph);
+          onSave={async (viewport, effects) => {
+            if (
+              viewport.width !== codebase.graph.viewport.width ||
+              viewport.height !== codebase.graph.viewport.height
+            ) {
+              const graph = { ...codebase.graph, viewport };
+              await save({ graph, editorLayout: codebase.editorLayout });
+              applyGraph(graph);
+            }
+            if (
+              effects.vignette !== backdropEffects.vignette ||
+              effects.grain !== backdropEffects.grain
+            ) {
+              setBackdropEffects(
+                await updatePlayableBackdropEffects(projectId, effects),
+              );
+            }
           }}
           onExport={exportGame}
           onClose={() => setProjectSettingsOpen(false)}

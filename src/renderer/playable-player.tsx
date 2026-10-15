@@ -23,6 +23,7 @@ import type {
   PlayableTransformEdit,
   NodePlayerDefinition,
 } from "../shared/playable-player-protocol.js";
+import type { PlayableBackdropEffects } from "../shared/playable-backdrop-effects.js";
 import { isPlayableFrameMessage } from "../shared/playable-player-protocol.js";
 import type { PlayablePickResult } from "../shared/playable-picker.js";
 import type { NodeRuntimeSnapshot } from "../shared/playable-runtime.js";
@@ -63,6 +64,7 @@ export interface NodePlayerProps {
   onMediaState?: (state: PlayableMediaState) => void;
   /** Keeps the authoring preview's media position across source updates. */
   preserveMediaState?: PlayableMediaState;
+  backdropEffects?: PlayableBackdropEffects;
   /** Removes the currently selected element without rebuilding the preview. */
   deleteCommand?: PlayablePickResult;
   /** Updates timed elements in the active preview without rebuilding it. */
@@ -96,6 +98,7 @@ export function NodePlayer({
   onDelete,
   onMediaState,
   preserveMediaState,
+  backdropEffects,
   deleteCommand,
   appearanceTimingCommand,
   onAppearanceTimingCommandApplied,
@@ -304,6 +307,19 @@ export function NodePlayer({
     ready,
     onAppearanceTimingCommandApplied,
   ]);
+
+  const backdropEffectsKey = JSON.stringify(backdropEffects ?? null);
+  useEffect(() => {
+    if (!ready || !backdropEffects) return;
+    iframe.current?.contentWindow?.postMessage(
+      {
+        kind: "putenggame:playable:backdrop-effects",
+        instanceId,
+        effects: backdropEffects,
+      },
+      "*",
+    );
+  }, [backdropEffectsKey, instanceId, ready]);
 
   const initialize = async () => {
     const target = iframe.current?.contentWindow;

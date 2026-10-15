@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import type { ProjectState } from "../shared/contracts.js";
 import type { NodeGraph } from "../shared/playable-nodes.js";
+import type { PlayableBackdropEffects } from "../shared/playable-backdrop-effects.js";
 import {
   canvasFormatForViewport,
   canvasFormatPreset,
@@ -11,7 +12,7 @@ import {
 import { formatStateValue } from "../shared/playable-debug.js";
 import { describePlayableValue } from "../shared/playable-editor.js";
 import { CanvasFormatOptions } from "./canvas-format-options.js";
-import { CircleHelp, Download, LoaderCircle } from "./icons.js";
+import { ChevronDown, Download, LoaderCircle } from "./icons.js";
 import { ProjectSettingsDialogFrame } from "./project-settings-dialog.js";
 
 const variablesHelp =
@@ -20,6 +21,7 @@ const variablesHelp =
 export function PlayableProjectSettingsDialog({
   project,
   graph,
+  backdropEffects,
   exporting,
   canExport,
   onSave,
@@ -28,23 +30,32 @@ export function PlayableProjectSettingsDialog({
 }: {
   project: ProjectState;
   graph: NodeGraph;
+  backdropEffects: PlayableBackdropEffects;
   exporting: boolean;
   canExport: boolean;
-  onSave: (viewport: Viewport) => Promise<void>;
+  onSave: (
+    viewport: Viewport,
+    effects: PlayableBackdropEffects,
+  ) => Promise<void>;
   onExport: () => Promise<void>;
   onClose: () => void;
 }) {
   const [selection, setSelection] = useState<CanvasFormatPresetId | undefined>(
     () => canvasFormatForViewport(graph.viewport)?.id,
   );
+  const [effects, setEffects] = useState(backdropEffects);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const viewport = selection
     ? canvasFormatPreset(selection).viewport
     : graph.viewport;
-  const changed =
+  const viewportChanged =
     viewport.width !== graph.viewport.width ||
     viewport.height !== graph.viewport.height;
+  const changed =
+    viewportChanged ||
+    effects.vignette !== backdropEffects.vignette ||
+    effects.grain !== backdropEffects.grain;
   const names = Object.keys(graph.initialState);
 
   async function submit(event: FormEvent): Promise<void> {
@@ -53,7 +64,7 @@ export function PlayableProjectSettingsDialog({
     setSaving(true);
     setError(undefined);
     try {
-      if (changed) await onSave(viewport);
+      if (changed) await onSave(viewport, effects);
       onClose();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -90,53 +101,85 @@ export function PlayableProjectSettingsDialog({
             disabled={saving || exporting}
             onChange={setSelection}
           />
-          {changed && graph.nodes.length > 0 ? (
+          {viewportChanged && graph.nodes.length > 0 ? (
             <p className="project-settings-hint">
               Review each Scene after changing screen size.
             </p>
           ) : null}
         </fieldset>
-        <fieldset className="project-settings-section" aria-label="Variables">
-          <legend className="project-settings-section-heading">
-            Variables
-            <button
-              className="icon-button project-settings-help"
-              type="button"
-              aria-label="About variables"
-              aria-description={variablesHelp}
-              data-tooltip={variablesHelp}
-              disabled={saving || exporting}
-            >
-              <CircleHelp size={14} aria-hidden="true" />
-            </button>
-          </legend>
-          {names.length ? (
-            <ul className="playable-variables" aria-label="Variables">
-              {names.map((name) => (
-                <li key={name}>
-                  <div className="playable-variables-head">
-                    <strong>{name}</strong>
-                    <span title={formatStateValue(graph.initialState[name])}>
-                      Starts {describePlayableValue(graph.initialState[name]!)}
-                    </span>
-                  </div>
-                  {graph.variables?.[name] ? (
-                    <p>{graph.variables[name]}</p>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="playable-variables-empty">
-              Nothing yet. The game doesn't remember anything between Scenes.
-            </p>
-          )}
+        <fieldset
+          className="project-settings-section playable-backdrop-effects"
+          aria-label="Background appearance"
+          disabled={saving || exporting}
+        >
+          <legend>Background appearance</legend>
+          <div className="playable-backdrop-options">
+            <label className="playable-backdrop-option">
+              <input
+                type="checkbox"
+                checked={effects.vignette}
+                onChange={(event) => {
+                  const checked = event.currentTarget.checked;
+                  setEffects((current) => ({
+                    ...current,
+                    vignette: checked,
+                  }));
+                }}
+              />
+              <span>Vignette</span>
+            </label>
+            <label className="playable-backdrop-option">
+              <input
+                type="checkbox"
+                checked={effects.grain}
+                onChange={(event) => {
+                  const checked = event.currentTarget.checked;
+                  setEffects((current) => ({
+                    ...current,
+                    grain: checked,
+                  }));
+                }}
+              />
+              <span>Grain texture</span>
+            </label>
+          </div>
         </fieldset>
+        <details className="project-settings-fold playable-variables-fold">
+          <summary>
+            <span>Variables</span>
+            <ChevronDown size={14} aria-hidden="true" />
+          </summary>
+          <div className="project-settings-section playable-variables-content">
+            <p className="project-settings-hint">{variablesHelp}</p>
+            {names.length ? (
+              <ul className="playable-variables" aria-label="Variables">
+                {names.map((name) => (
+                  <li key={name}>
+                    <div className="playable-variables-head">
+                      <strong>{name}</strong>
+                      <span title={formatStateValue(graph.initialState[name])}>
+                        Starts{" "}
+                        {describePlayableValue(graph.initialState[name]!)}
+                      </span>
+                    </div>
+                    {graph.variables?.[name] ? (
+                      <p>{graph.variables[name]}</p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="playable-variables-empty">
+                Nothing yet. The game doesn't remember anything between Scenes.
+              </p>
+            )}
+          </div>
+        </details>
         <fieldset className="project-settings-section">
           <legend>Export</legend>
           {changed ? (
             <p className="project-settings-hint">
-              Save screen size changes before exporting.
+              Save project setting changes before exporting.
             </p>
           ) : null}
           <button

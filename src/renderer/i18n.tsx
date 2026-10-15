@@ -93,6 +93,37 @@ const ZH: Record<string, string> = {
     "Start from a Template, or describe your story in the chat.":
       "从模板开始，或在聊天中描述你的故事。",
     "Add a Scene": "添加场景",
+    Affection: "好感度互动",
+    "Choices change a character's affection": "通过选项改变人物好感度",
+    "Affection settings": "好感度设置",
+    "Characters and starting affection": "人物与初始好感度",
+    "Choice changes and branch thresholds": "选项变化与分支阈值",
+    "These settings are for authors. Players only see the affection display and story choices.": "这些设置仅供作者编辑，玩家只会看到场景中的好感度展示和剧情选项。",
+    "Add character": "添加人物",
+    "Remove character": "删除人物",
+    "Add choice": "添加选项",
+    "Remove choice": "删除选项",
+    "Character name": "人物名称",
+    "Starting value": "初始数值",
+    "Choice text": "选项文字",
+    Character: "影响人物",
+    Change: "变化值",
+    Threshold: "达标阈值",
+    "Met threshold exit": "达标出口",
+    "Below threshold exit": "未达标出口",
+    "Character 1": "人物 1",
+    "Character 2": "人物 2",
+    "Character 3": "人物 3",
+    "Character 4": "人物 4",
+    "Choice 1": "选项 1",
+    "Choice 2": "选项 2",
+    "Choice 3": "选项 3",
+    "Choice 4": "选项 4",
+    "Please check the character, choice, and value settings": "请检查人物、选项和数值设置",
+    "Exit IDs must use lowercase letters, numbers, or hyphens and be unique": "出口名称需使用小写英文字母、数字或连字符，且不能重复",
+    "Scene no longer exists": "场景已不存在",
+    "Could not read Scene source": "无法读取场景内容",
+    "Affection settings were not found in this Scene": "没有找到好感度设置区域",
     "Canvas actions": "画布操作",
     "Scene actions": "场景操作",
     Undo: "撤销",
@@ -746,6 +777,10 @@ const TRANSLATED_ATTRIBUTES = [
 ];
 
 Object.assign(ZH, {
+  "Background appearance": "背景效果",
+  Vignette: "暗角",
+  "Grain texture": "颗粒纹理",
+  "Save project setting changes before exporting.": "导出前请先保存项目设置更改。",
   Agent: "智能体",
   Thinking: "思考中",
   "Waiting to steer": "等待调整",
@@ -1590,6 +1625,11 @@ function translateDynamic(value: string): string {
   next = next.replaceAll("PutengGame", "扑腾");
   next = next.replace(/^Node (\d+)$/, "节点 $1");
   next = next.replace(/^Node$/, "节点");
+  next = next.replace(/^Character (\d+)$/, "人物 $1");
+  next = next.replace(/^Choice (\d+)$/, "选项 $1");
+  next = next.replace(/^(.+) · Threshold met$/, "$1 · 达到阈值");
+  next = next.replace(/^(.+) · Below threshold$/, "$1 · 未达到阈值");
+  next = next.replace(/^(.+)'s affection, carried across Scenes$/, "$1的好感度，在场景间持续保存");
   next = next.replace(/^Reference (\d+)$/, "参考图 $1");
   next = next.replace(/^blank-(\d+)$/, "空白场景 $1");
   next = next.replace(

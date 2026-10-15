@@ -24,11 +24,13 @@ import { supportsWebPreview } from "../shared/project-runtime.js";
 export function ProjectSettingsDialogFrame({
   children,
   busy = false,
+  title = "Project settings",
   initialFocusRef,
   onClose,
 }: {
   children: ReactNode;
   busy?: boolean;
+  title?: string;
   initialFocusRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
 }) {
@@ -98,7 +100,7 @@ export function ProjectSettingsDialogFrame({
         tabIndex={-1}
       >
         <header>
-          <h2 id={titleId}>Project settings</h2>
+          <h2 id={titleId}>{title}</h2>
           <button
             type="button"
             disabled={busy}

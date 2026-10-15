@@ -84,6 +84,48 @@ describe("daemon", () => {
     expect(codebase.graph).toMatchObject({ entryNodeId: "start", edges: [] });
   });
 
+  it("persists project-wide backdrop effects and uses them in the built Scenes", async () => {
+    const app = createApp({ dataDirectory: await mkdtemp(path.join(tmpdir(), "putenggame-effects-")) });
+    apps.push(app);
+    const project = (await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { name: "Effects", type: "interactive-story" },
+    })).json();
+    await writePlayableFixtureWorkspace(project.workspacePath);
+    await mkdir(path.join(project.workspacePath, "shared", "style"), { recursive: true });
+    await writeFile(
+      path.join(project.workspacePath, "shared", "style", "components.css"),
+      `.backdrop::after{content:"";background:radial-gradient(circle,transparent,#000),url("data:image/svg+xml;utf8,<svg><feTurbulence/></svg>")}`,
+    );
+    for (const node of ["menu", "lobby", "archive"]) {
+      await writeFile(
+        path.join(project.workspacePath, "nodes", node, "style.css"),
+        `@import "../../shared/style/components.css";\n`,
+      );
+    }
+
+    const initial = await app.inject({
+      method: "GET",
+      url: `/projects/${project.id}/playable/backdrop-effects`,
+    });
+    expect(initial.json()).toEqual({ vignette: true, grain: true });
+
+    const saved = await app.inject({
+      method: "PUT",
+      url: `/projects/${project.id}/playable/backdrop-effects`,
+      payload: { vignette: false, grain: true },
+    });
+    expect(saved.statusCode).toBe(200);
+    const built = await app.inject({
+      method: "GET",
+      url: `/projects/${project.id}/playable/validation`,
+    });
+    expect(built.json().definition.compiled.nodes.menu.css).toContain(
+      "--putenggame-backdrop-vignette: none",
+    );
+  });
+
   it("serves the Node Runtime only for projects with graph.json", async () => {
     const app = createApp({ dataDirectory: await mkdtemp(path.join(tmpdir(), "putenggame-test-")) });
     apps.push(app);
@@ -1885,7 +1927,7 @@ describe("Playable Nodes projects", () => {
     const presets = await app.inject({ method: "GET", url: "/playable/presets" });
     expect(presets.statusCode).toBe(200);
     expect(presets.json().presets.map((preset: { id: string }) => preset.id)).toEqual([
-      "blank", "main-menu", "choice", "qte", "hotspot", "ending", "story-map",
+      "blank", "main-menu", "choice", "qte", "hotspot", "ending", "story-map", "affection",
     ]);
 
     const created = await app.inject({
