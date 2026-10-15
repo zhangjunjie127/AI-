@@ -1,4 +1,4 @@
-import { Check, FilePenLine, FileText, History, LoaderCircle, Search, X } from "./icons.js";
+import { Check, ChatRound, FilePenLine, FileText, LoaderCircle, Search, X } from "./icons.js";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { ConversationSummary } from "../shared/contracts.js";
 
@@ -99,7 +99,7 @@ export function ConversationMenu({
         aria-label="Conversation history"
         onClick={() => setOpen((value) => !value)}
       >
-        <History size={14} />
+        <ChatRound size={14} />
       </button>
 
       {open ? (
