@@ -1,0 +1,85 @@
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { BundledPluginStore } from "../src/daemon/bundled-plugins.js";
+
+describe("bundled plugins", () => {
+  it("loads a standard skill-only PutengGame plugin directory", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "putenggame-bundled-plugins-"));
+    const plugin = path.join(root, "reference-modeler");
+    await mkdir(path.join(plugin, ".putenggame-plugin"), { recursive: true });
+    await mkdir(path.join(plugin, "skills", "reference-modeler"), { recursive: true });
+    await writeFile(path.join(plugin, ".putenggame-plugin", "plugin.json"), JSON.stringify({
+      name: "reference-modeler",
+      version: "0.1.0",
+      description: "Rebuild a reference as a model",
+      skills: "./skills/",
+      interface: { longDescription: "A detailed modeling workflow." },
+    }));
+    await writeFile(path.join(plugin, "skills", "reference-modeler", "SKILL.md"), "---\nname: reference-modeler\ndescription: Model a reference\n---\n");
+    const store = new BundledPluginStore(root);
+
+    await store.load();
+
+    expect(store.list()).toMatchObject([{
+      id: "putenggame:reference-modeler",
+      source: { type: "builtIn" },
+      longDescription: "A detailed modeling workflow.",
+      skills: [{ id: "skills/reference-modeler/SKILL.md" }],
+      connections: [],
+    }]);
+    expect(store.installedPath("putenggame:reference-modeler")).toBe(plugin);
+  });
+
+  it("loads the built-in Web Game Studio skill suite", async () => {
+    const store = new BundledPluginStore(path.resolve("plugins"));
+
+    await store.load();
+
+    expect(store.read("putenggame:web-game-studio")).toMatchObject({
+      displayName: "Web Game Studio",
+      projectTypes: ["web-game"],
+      skills: [
+        { name: "Game Playtest" },
+        { name: "Game Ui Frontend" },
+        { name: "Phaser 2d Game" },
+        { name: "React Three Fiber Game" },
+        { name: "Sprite Pipeline" },
+        { name: "Three Webgl Game" },
+        { name: "Web 3d Asset Pipeline" },
+        { name: "Web Game Foundations" },
+        { name: "Web Game Studio" },
+      ],
+    });
+  });
+
+  it("loads Game Studio independently of the Web Game Studio suite", async () => {
+    const store = new BundledPluginStore(path.resolve("plugins"));
+    await store.load();
+
+    expect(store.read("putenggame:game-studio")).toMatchObject({
+      displayName: "Game Studio",
+      enabled: true,
+      projectTypes: ["general", "godot-game", "interactive-story"],
+      skills: [
+        { id: "skills/game-foundations/SKILL.md", name: "Game Foundations" },
+        { id: "skills/game-qa/SKILL.md", name: "Game Qa" },
+        { id: "skills/game-studio/SKILL.md", name: "Game Studio" },
+      ],
+      connections: [],
+    });
+  });
+
+  it("loads the built-in Three.js World skill", async () => {
+    const store = new BundledPluginStore(path.resolve("plugins"));
+
+    await store.load();
+
+    expect(store.read("putenggame:threejs-world")).toMatchObject({
+      displayName: "Three.js World",
+      projectTypes: ["web-game"],
+      skills: [{ id: "skills/threejs-world/SKILL.md", name: "Threejs World" }],
+    });
+  });
+});

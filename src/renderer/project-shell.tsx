@@ -1,0 +1,906 @@
+import {
+  ArrowLeft,
+  LoaderCircle,
+  MessageSquarePlus,
+  PanelToggle,
+  RefreshCw,
+  X,
+} from "./icons.js";
+import {
+  Activity,
+  useEffect,
+  useCallback,
+  useReducer,
+  useRef,
+  useState,
+  lazy,
+  Suspense,
+} from "react";
+import type { AgentModel, AgentModelRef, AgentReasoningLevel, ConversationCapabilities, ConversationSummary, PendingPrompt, PluginMention, ProjectState, PromptAttachment, PromptContext, PromptImage, PromptMode, PromptReference, ThreadItem } from "../shared/contracts.js";
+import { findAgentModel, preferredAgentModel } from "../shared/agent-models.js";
+import { isWebRuntimeProjectType, supportsWebPreview } from "../shared/project-runtime.js";
+import {
+  ApiError,
+  acquirePreview,
+  releasePreview,
+  stopPreview,
+  approvePlan,
+  answerQuestionnaire,
+  cancelPrompt,
+  cancelPlan,
+  compactConversation,
+  createConversation,
+  getConversation,
+  getConversationContextUsage,
+  getConversationCapabilities,
+  getProject,
+  listModels,
+  listConversations,
+  publishProject,
+  removePendingPrompt,
+  renameConversation,
+  reviseLastPrompt,
+  refinePlan,
+  sendPrompt,
+  steerPendingPrompt,
+  setConversationModel,
+  setConversationReasoning,
+  startPreview,
+  subscribeToProject,
+  waitForRuntime,
+} from "./api.js";
+import { ConversationMenu } from "./conversation-menu.js";
+import { AgentTimeline } from "./agent-timeline.js";
+import { CodingWorkspace } from "./coding-workspace.js";
+import { PlayableEditorWorkspace } from "./playable-editor-workspace.js";
+import type { PlayableChatState } from "./playable-chat.js";
+import { Composer, type ComposerDraft } from "./composer.js";
+import { composerDrafts } from "./composer-drafts.js";
+import { QuestionnaireCard } from "./questionnaire-card.js";
+import { PlanApprovalCard } from "./plan-approval-card.js";
+import { initialRendererState, rendererReducer } from "./state.js";
+import { useAgentModels } from "./model-selector.js";
+import { useAuth } from "./auth.js";
+import { readChatLayout, type ChatLayout } from "./chat-layout.js";
+import { forgetPendingPublish, rememberPendingPublish, takePendingPublish } from "./pending-publish.js";
+import type { PublishDetails } from "./publish-dialog.js";
+import { usePlaytestAskRequests } from "./playable-playtest.js";
+import { useRuntimeConnection } from "./runtime-connection.js";
+import { ErrorBoundary } from "./error-boundary.js";
+import { WorkspaceShell, WorkspaceAgentPane } from "./workspace-shell.js";
+
+interface ProjectShellProps {
+  projectId: string;
+  conversationId?: string;
+  view?: "design";
+  onViewChange?: (view: "design" | "workspace", options?: { replace?: boolean }) => void;
+  initialPrompt?: { generation: number; prompt: string; mentions: PluginMention[]; images: PromptImage[]; mode: PromptMode; attachments?: PromptAttachment[] };
+  initialDraft?: ComposerDraft;
+  initialCanvasNodeId?: string;
+  onInitialCanvasNodeHandled?: () => void;
+  onInitialPromptHandled?: () => void;
+  onInitialDraftHandled?: () => void;
+  onOpenConversation: (conversationId: string, replace?: boolean) => void;
+  onHome: () => void;
+}
+
+const CanvasWorkspace = lazy(() => import("./canvas-workspace.js").then((module) => ({ default: module.CanvasWorkspace })));
+const GODOT_WORKSPACE_OPEN_STORAGE_KEY = "putenggame-godot-workspace-open";
+const EMPTY_CAPABILITIES: ConversationCapabilities = { plugins: [], skills: [] };
+
+export function ProjectShell({
+  projectId,
+  conversationId,
+  view,
+  onViewChange,
+  initialPrompt,
+  initialDraft,
+  initialCanvasNodeId,
+  onInitialCanvasNodeHandled,
+  onInitialPromptHandled,
+  onInitialDraftHandled,
+  onOpenConversation,
+  onHome,
+}: ProjectShellProps) {
+  const auth = useAuth();
+  const runtime = useRuntimeConnection();
+  const openedGeneration = useRef(runtime.generation);
+  const previewPaused = runtime.generation !== openedGeneration.current || runtime.status !== "ready";
+  const [state, dispatch] = useReducer(rendererReducer, initialRendererState);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [sendingInitialPrompt, setSendingInitialPrompt] = useState(false);
+  const [creatingConversation, setCreatingConversation] = useState(false);
+  const [agentCollapsed, setAgentCollapsed] = useState(view === "design" && !initialPrompt && !initialDraft);
+  const [designOpen, setDesignOpen] = useState(view === "design");
+  useEffect(() => { setDesignOpen(view === "design"); }, [view]);
+  const changeWorkspaceView = useCallback((open: boolean, options?: { replace?: boolean }): void => {
+    setDesignOpen(open);
+    onViewChange?.(open ? "design" : "workspace", options);
+  }, [onViewChange]);
+  const [godotWorkspaceOpen, setGodotWorkspaceOpen] = useState(readGodotWorkspaceOpen);
+  const [chatLayout] = useState<ChatLayout>(readChatLayout);
+  const [publishing, setPublishing] = useState(false);
+  const [publishDialog, setPublishDialog] = useState<{ projectId: string; status: "open" | "success" }>();
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
+  const [openFileRequest, setOpenFileRequest] = useState<{ path: string; id: number }>();
+  const [modelChanging, setModelChanging] = useState(false);
+  const [capabilities, setCapabilities] = useState<ConversationCapabilities>(EMPTY_CAPABILITIES);
+  const [playableChat, setPlayableChat] = useState<PlayableChatState>();
+  /** The Playable surface whose chip the user removed from the next message. */
+  const [dismissedSurface, setDismissedSurface] = useState<string>();
+  const saveDesign = useRef<(() => Promise<void>) | undefined>(undefined);
+  const registerDesignSave = useCallback((save: (() => Promise<void>) | undefined) => { saveDesign.current = save; }, []);
+  const [designContext, setDesignContext] = useState<PromptContext>();
+  const [dismissedDesign, setDismissedDesign] = useState<string>();
+  // "Ask AI to fix" in the Playtest window lands in this chat, ready to send.
+  usePlaytestAskRequests(state.project?.id, requestPrompt);
+  const modelCatalog = useAgentModels();
+  const effectiveModel = findAgentModel(modelCatalog.hiddenModels ?? [], state.settings.model) ?? preferredAgentModel(modelCatalog.models, state.settings.model, modelCatalog.defaultModel);
+  const initialPromptAttempted = useRef(false);
+  const unsubscribeEvents = useRef<(() => void) | undefined>(undefined);
+  const timeline = useRef<HTMLDivElement>(null);
+  const followTimeline = useRef(true);
+
+  // Godot has no Preview, so its workspace opens on Design unless the user hid it,
+  // since Design keeps the workspace shown.
+  const godotDefaultViewApplied = useRef(false);
+  useEffect(() => {
+    if (state.project?.type !== "godot-game") return;
+    setAgentCollapsed(false);
+    if (godotDefaultViewApplied.current) return;
+    godotDefaultViewApplied.current = true;
+    if (view !== "design" && godotWorkspaceOpen) changeWorkspaceView(true, { replace: true });
+  }, [state.project?.id, state.project?.type]);
+
+  useEffect(() => {
+    const current = state.conversation;
+    if (!current || state.connection !== "open") {
+      setCapabilities(EMPTY_CAPABILITIES);
+      return;
+    }
+    let disposed = false;
+    void getConversationCapabilities(projectId, current.id).then((next) => {
+      if (!disposed) setCapabilities(next);
+    }).catch(() => {
+      if (!disposed) setCapabilities(EMPTY_CAPABILITIES);
+    });
+    return () => { disposed = true; };
+  }, [projectId, state.conversation?.id, state.connection]);
+
+  function subscribe(cursor: number, selectedConversationId: string): void {
+    unsubscribeEvents.current?.();
+    unsubscribeEvents.current = subscribeToProject(projectId, cursor, {
+      onEvent: (event) => {
+        dispatch({ type: "runtime-event", event });
+        if (event.type === "agent.completed") setWorkspaceRevision((value) => value + 1);
+        if (event.type === "conversation.renamed") {
+          setConversations((current) => current.map((conversation) =>
+            conversation.id === event.data.conversation.id ? event.data.conversation : conversation));
+        }
+        if (
+          event.type === "agent.started" || event.type === "agent.completed" ||
+          event.type === "agent.cancelled" || event.type === "agent.error"
+        ) {
+          void listConversations(projectId).then(setConversations).catch(() => {});
+        }
+      },
+      onOpen: () => dispatch({ type: "connection", status: "open" }),
+      onError: () => dispatch({ type: "connection", status: "reconnecting" }),
+      onReset: async () => {
+        const [project, detail] = await Promise.all([getProject(projectId), getConversation(projectId, selectedConversationId, true)]);
+        dispatch({ type: "initialized", project, detail });
+        setWorkspaceRevision((value) => value + 1);
+        return detail.cursor;
+      },
+    });
+  }
+
+  useEffect(() => {
+    if (runtime.status !== "ready") {
+      dispatch({ type: "connection", status: "reconnecting" });
+      return;
+    }
+    let disposed = false;
+
+    async function bootstrap() {
+      try {
+        await waitForRuntime();
+        const [project, availableConversations] = await Promise.all([getProject(projectId), listConversations(projectId)]);
+        if (disposed) return;
+        if (project.workspaceAvailable === false) {
+          dispatch({ type: "fatal", message: "The selected workspace folder is no longer available." });
+          return;
+        }
+        setConversations(availableConversations);
+        const requestedConversation = availableConversations.find((item) => item.id === conversationId);
+        let selected = requestedConversation ?? availableConversations[0];
+        if (!selected) {
+          const model = await initialConversationModel();
+          if (disposed) return;
+          selected = await createConversation(projectId, model);
+        }
+        if (disposed) return;
+        if (!requestedConversation) {
+          if (availableConversations.length === 0) setConversations([selected]);
+          onOpenConversation(selected.id, true);
+        }
+        const detail = await getConversation(projectId, selected.id);
+        if (disposed) return;
+        dispatch({
+          type: "initialized",
+          project,
+          detail,
+        });
+        subscribe(detail.cursor, selected.id);
+        if (runtime.recovered) setWorkspaceRevision((value) => value + 1);
+
+
+
+      } catch (error) {
+        if (!disposed) dispatch({ type: "fatal", message: errorMessage(error) });
+      }
+    }
+
+    void bootstrap();
+    return () => {
+      disposed = true;
+      unsubscribeEvents.current?.();
+      unsubscribeEvents.current = undefined;
+    };
+  }, [projectId, runtime.generation, runtime.status]);
+
+  const previewSupported = supportsWebPreview(state.project);
+  useEffect(() => {
+    if (!previewSupported || runtime.status !== "ready") return;
+    const leaseId = crypto.randomUUID();
+    void acquirePreview(projectId, leaseId, true, previewPaused).catch(() => {});
+    const timer = setInterval(() => { void acquirePreview(projectId, leaseId).catch(() => {}); }, 20_000);
+    return () => { clearInterval(timer); void releasePreview(projectId, leaseId).catch(() => {}); };
+  }, [projectId, previewSupported, runtime.generation, runtime.status]);
+
+  useEffect(() => {
+    if (!state.project || state.phase !== "ready" || !conversationId || state.conversation?.id === conversationId) return;
+    let disposed = false;
+    async function loadSelectedConversation() {
+      try {
+        unsubscribeEvents.current?.();
+        unsubscribeEvents.current = undefined;
+        dispatch({ type: "connection", status: "connecting" });
+        const availableConversations = await listConversations(projectId);
+        if (disposed) return;
+        setConversations(availableConversations);
+        const requestedConversation = availableConversations.find((item) => item.id === conversationId);
+        if (!requestedConversation) {
+          const selected = availableConversations[0];
+          if (selected) onOpenConversation(selected.id, true);
+          return;
+        }
+        const detail = await getConversation(projectId, requestedConversation.id);
+        if (!disposed) dispatch({
+          type: "conversation-loaded",
+          detail,
+        });
+        if (!disposed) subscribe(detail.cursor, requestedConversation.id);
+      } catch (error) {
+        if (!disposed) dispatch({ type: "fatal", message: errorMessage(error) });
+      }
+    }
+    void loadSelectedConversation();
+    return () => { disposed = true; };
+  }, [projectId, conversationId, state.project?.id, state.phase, state.conversation?.id]);
+
+  useEffect(() => {
+    const project = state.project;
+    const conversation = state.conversation;
+    if (
+      state.connection !== "open" || !project || !conversation || conversation.id !== conversationId ||
+      !initialPrompt || initialPromptAttempted.current || initialPrompt.generation !== runtime.generation || runtime.status !== "ready"
+    ) return;
+    sendInitialPrompt();
+  }, [state.connection, state.project?.id, state.conversation?.id, conversationId, initialPrompt, runtime.generation, runtime.status]);
+
+  function sendInitialPrompt(): void {
+    const project = state.project;
+    const conversation = state.conversation;
+    if (!initialPrompt || !project || !conversation || conversation.id !== conversationId || sendingInitialPrompt || runtime.status !== "ready") return;
+    initialPromptAttempted.current = true;
+    setSendingInitialPrompt(true);
+    void sendPrompt(project.id, conversation.id, initialPrompt.prompt, [], initialPrompt.images, initialPrompt.mode, initialPrompt.mentions, initialPrompt.attachments).then(() => {
+      if (initialPrompt.images.length || initialPrompt.attachments?.length) setWorkspaceRevision((value) => value + 1);
+    }).catch((error) => {
+      dispatch({ type: "notice", message: errorMessage(error) });
+    }).finally(() => {
+      onInitialPromptHandled?.();
+      setSendingInitialPrompt(false);
+    });
+  }
+
+  useEffect(() => {
+    const element = timeline.current;
+    if (element && followTimeline.current && (state.project?.type === "godot-game" || !agentCollapsed)) {
+      const frame = requestAnimationFrame(() => { element.scrollTop = element.scrollHeight; });
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [state.turns, agentCollapsed, state.project?.type]);
+
+  useEffect(() => {
+    const element = timeline.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => {
+      if (followTimeline.current) element.scrollTop = element.scrollHeight;
+    });
+    for (const child of element.children) observer.observe(child);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [state.conversation?.id, state.agent.status, state.plan.mode]);
+
+  useEffect(() => {
+    const project = state.project;
+    const busy = sendingInitialPrompt ||
+      state.agent.status === "running" || state.agent.status === "cancelling";
+    if (runtime.recovered || !project || (!isWebRuntimeProjectType(project.type) && project.type !== "interactive-story") || auth.state.status !== "signed-in" || state.phase !== "ready" || publishing || busy) return;
+    const pending = takePendingPublish(sessionStorage, project.id);
+    if (pending) void publish(pending).catch(() => undefined);
+  }, [auth.state.status, state.phase, state.project?.id, state.project?.type, state.agent.status, sendingInitialPrompt, publishing]);
+
+  if (state.phase === "fatal") {
+    return <FatalState message={state.notice ?? "Could not reach the local runtime."} onHome={onHome} />;
+  }
+
+  const project = state.project;
+  const conversation = state.conversation;
+  const publishDialogStatus = publishDialog?.projectId === project?.id ? publishDialog?.status : undefined;
+
+  const displayedModel = state.settings.model ?? modelCatalog.defaultModel ?? modelCatalog.models[0];
+  const activeTurn = state.turns.findLast((turn) => turn.status === "inProgress");
+  const items = state.turns.flatMap((turn) => turn.items);
+  const questionnaire = activeTurn?.items.find((item): item is Extract<ThreadItem, { type: "userInputRequest" }> => (
+    item.type === "userInputRequest" && item.status === "inProgress"
+  ));
+  const currentConversationBusy = Boolean(activeTurn);
+  const agentBusy = sendingInitialPrompt || currentConversationBusy || state.agent.status === "running" || state.agent.status === "cancelling";
+  const activePlanItem = activeTurn
+    ? activeTurn.items.findLast((item) => item.type === "plan")
+    : undefined;
+  const activePlan = activePlanItem?.type === "plan"
+    ? activePlanItem.plan
+    : state.plan.mode !== "normal" ? state.plan.plan : undefined;
+
+  const canvasOpen = designOpen || project?.type === "asset-canvas";
+  const playableSurface = !canvasOpen && playableChat?.surface && playableChat.surface.key !== dismissedSurface ? playableChat.surface : undefined;
+  const designChipKey = designContext ? `design:${designContext.text}` : undefined;
+  const currentDesignContext = canvasOpen && designChipKey !== dismissedDesign ? designContext : undefined;
+  const chatContexts = [playableSurface?.chip, ...(!canvasOpen ? playableChat?.attachments ?? [] : []).map((attachment) => attachment.chip), ...(currentDesignContext ? [{ key: designChipKey!, kind: currentDesignContext.kind, label: currentDesignContext.label }] : [])].filter((chip) => chip !== undefined);
+
+  async function submitPrompt(nextPrompt: string, mentions: PluginMention[], images: PromptImage[], mode: PromptMode, attachments: PromptAttachment[] = [], references: PromptReference[] = [], designContexts: PromptContext[] = []): Promise<boolean> {
+    if (!project || !conversation) return false;
+    followTimeline.current = true;
+    dispatch({ type: "notice", message: undefined });
+    try {
+      await saveDesign.current?.();
+      const surface = playableSurface;
+      const previewContexts = !canvasOpen ? playableChat?.attachments ?? [] : [];
+      const previewImage = previewContexts.length ? await playableChat?.capture().catch(() => undefined) : undefined;
+      const contexts = [surface?.context, ...previewContexts.map((attachment) => attachment.context)].filter((context) => context !== undefined);
+      const sentImages = previewImage ? [...images, previewImage] : images;
+      const allReferences = [...(surface?.references ?? []), ...references.filter((reference) => !(surface?.references ?? []).some((current) => current.path === reference.path))];
+      await sendPrompt(project.id, conversation.id, nextPrompt, allReferences, sentImages, mode, mentions, attachments, [...contexts, ...designContexts, ...(currentDesignContext ? [currentDesignContext] : [])]);
+      if (sentImages.length || attachments.length) setWorkspaceRevision((value) => value + 1);
+      if (previewContexts.length) playableChat?.clearAttachments();
+      return true;
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+      return false;
+    }
+  }
+
+  /**
+   * Sends a request the editor wrote, such as a text edit it cannot make
+   * itself, with the open Node as context. Picks stay for the user's message.
+   */
+  async function sendEditorRequest(text: string, contexts: PromptContext[]): Promise<boolean> {
+    if (!project || !conversation || state.connection !== "open") return false;
+    followTimeline.current = true;
+    const surface = playableChat?.surface;
+    try {
+      await saveDesign.current?.();
+      await sendPrompt(project.id, conversation.id, text, surface?.references ?? [], [], "normal", [], [], [...(surface ? [surface.context] : []), ...contexts]);
+      setAgentCollapsed(false);
+      return true;
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+      return false;
+    }
+  }
+
+  async function compactCurrentConversation(instructions?: string): Promise<void> {
+    if (!project || !conversation || agentBusy || state.connection !== "open") return;
+    dispatch({ type: "notice", message: undefined });
+    try {
+      await compactConversation(project.id, conversation.id, instructions);
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+    }
+  }
+
+  async function currentContextPercent(): Promise<number | undefined> {
+    if (!project || !conversation) return undefined;
+    const usage = await getConversationContextUsage(project.id, conversation.id);
+    return usage?.percent === null || usage?.percent === undefined
+      ? undefined
+      : Math.round(Math.max(0, Math.min(100, usage.percent)));
+  }
+
+  async function executePlan(): Promise<boolean> {
+    if (!project || !conversation) return false;
+    try {
+      await saveDesign.current?.();
+      await approvePlan(project.id, conversation.id);
+      return true;
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+      return false;
+    }
+  }
+
+  async function discardPlan(): Promise<boolean> {
+    if (!project || !conversation) return false;
+    try {
+      await cancelPlan(project.id, conversation.id);
+      return true;
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+      return false;
+    }
+  }
+
+  async function refineCurrentPlan(feedback: string): Promise<boolean> {
+    if (!project || !conversation || !feedback.trim()) return false;
+    try {
+      await refinePlan(project.id, conversation.id);
+      return submitPrompt(feedback.trim(), [], [], "planning");
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+      return false;
+    }
+  }
+
+  async function respondToQuestionnaire(answers: Array<{ questionId: string; value: string }>, cancelled = false): Promise<boolean> {
+    if (!project || !conversation || !questionnaire) return false;
+    try {
+      await answerQuestionnaire(project.id, conversation.id, {
+        requestId: questionnaire.requestId,
+        ...(cancelled ? { cancelled: true } : { answers }),
+      });
+      return true;
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+      return false;
+    }
+  }
+
+  const revisePrompt = useCallback(async (nextPrompt: string): Promise<boolean> => {
+    if (!project || !conversation || agentBusy || state.pendingPrompts.length > 0 || state.connection !== "open") return false;
+    followTimeline.current = true;
+    dispatch({ type: "notice", message: undefined });
+    try {
+      await reviseLastPrompt(project.id, conversation.id, nextPrompt);
+      return true;
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+      return false;
+    }
+  }, [project, conversation, agentBusy, state.pendingPrompts.length, state.connection]);
+
+  async function stopAgent() {
+    const turnId = activeTurn?.id;
+    if (!project || !conversation || !turnId || !currentConversationBusy) return;
+    try {
+      await cancelPrompt(project.id, conversation.id, turnId);
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+    }
+  }
+
+  async function removeFollowUp(turnId: string): Promise<boolean> {
+    if (!project || !conversation) return false;
+    try {
+      await removePendingPrompt(project.id, conversation.id, turnId);
+      return true;
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+      return false;
+    }
+  }
+
+  async function steerFollowUp(turnId: string): Promise<boolean> {
+    if (!project || !conversation) return false;
+    try {
+      await steerPendingPrompt(project.id, conversation.id, turnId);
+      return true;
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+      return false;
+    }
+  }
+
+  async function editFollowUp(item: PendingPrompt): Promise<boolean> {
+    return removeFollowUp(item.turnId);
+  }
+
+  async function restartPreview(updated = project, reinstall = false) {
+    if (!updated || updated.preview.status === "starting") return;
+    dispatch({ type: "notice", message: undefined });
+    try {
+      await startPreview(updated.id, reinstall);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "PREVIEW_CANCELLED") return;
+      dispatch({ type: "notice", message: errorMessage(error) });
+    }
+  }
+
+  async function publish(details: PublishDetails): Promise<boolean> {
+    if (!project || publishing || agentBusy) return false;
+    const resumeAfterWebSignIn = !window.putengGameDesktop && auth.state.status !== "signed-in";
+    if (resumeAfterWebSignIn) rememberPendingPublish(sessionStorage, project.id, details);
+    setPublishing(true);
+    dispatch({ type: "notice", message: undefined });
+    try {
+      const accessToken = await auth.requestAccessToken();
+      if (!accessToken) {
+        if (resumeAfterWebSignIn) forgetPendingPublish(sessionStorage);
+        return false;
+      }
+      forgetPendingPublish(sessionStorage);
+      const result = await publishProject(project.id, accessToken, details);
+      const publication = {
+        gameId: result.game.id,
+        deploymentId: result.game.deploymentId,
+        playUrl: result.game.playUrl,
+        publishedAt: result.game.publishedAt,
+        title: result.game.title,
+        description: result.game.description,
+      };
+      dispatch({ type: "publication-updated", projectId: project.id, publication });
+      setPublishDialog({ projectId: project.id, status: "success" });
+      return true;
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+      throw error;
+    } finally {
+      setPublishing(false);
+    }
+  }
+
+  async function newConversation() {
+    if (!project || creatingConversation) return;
+    setCreatingConversation(true);
+    dispatch({ type: "notice", message: undefined });
+    try {
+      const created = await createConversation(project.id);
+      setCreatingConversation(false);
+      onOpenConversation(created.id);
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+      setCreatingConversation(false);
+    }
+  }
+
+  async function changeModel(model: AgentModel) {
+    if (!project || !conversation || agentBusy || modelChanging) return;
+    setModelChanging(true);
+    dispatch({ type: "notice", message: undefined });
+    try {
+      const settings = await setConversationModel(project.id, conversation.id, model);
+      dispatch({ type: "conversation-settings", settings });
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+    } finally {
+      setModelChanging(false);
+    }
+  }
+
+  async function changeReasoning(level: AgentReasoningLevel) {
+    if (!project || !conversation || agentBusy || modelChanging) return;
+    setModelChanging(true);
+    dispatch({ type: "notice", message: undefined });
+    try {
+      const reasoningLevel = await setConversationReasoning(project.id, conversation.id, level);
+      if (!displayedModel) return;
+      dispatch({ type: "conversation-settings", settings: { model: displayedModel, reasoningLevel } });
+    } catch (error) {
+      dispatch({ type: "notice", message: errorMessage(error) });
+    } finally {
+      setModelChanging(false);
+    }
+  }
+
+  async function rename(conversationId: string, title: string): Promise<void> {
+    if (!project) return;
+    const renamed = await renameConversation(project.id, conversationId, title);
+    setConversations((items) => items.map((item) => item.id === renamed.id ? renamed : item));
+  }
+
+  function requestHome(): void {
+    const save = saveDesign.current;
+    if (!save) { onHome(); return; }
+    void save().then(onHome).catch((cause) => {
+      dispatch({ type: "notice", message: errorMessage(cause) });
+    });
+  }
+
+  const setGodotWorkspaceVisibility = useCallback((open: boolean): void => {
+    setGodotWorkspaceOpen(open);
+    localStorage.setItem(GODOT_WORKSPACE_OPEN_STORAGE_KEY, String(open));
+  }, []);
+
+  const isGodotProject = project?.type === "godot-game";
+
+  const openWorkspaceFile = useCallback((path: string): void => {
+    changeWorkspaceView(false);
+    setOpenFileRequest((current) => ({ path, id: (current?.id ?? 0) + 1 }));
+    if (isGodotProject) setGodotWorkspaceVisibility(true);
+  }, [changeWorkspaceView, isGodotProject, setGodotWorkspaceVisibility]);
+  const addToChat = useCallback((text: string) => {
+    if (!conversation) return;
+    composerDrafts.get({ projectId, conversationId: conversation.id }).update({ reference: { text } });
+  }, [projectId, conversation?.id]);
+
+  function requestPrompt(text: string): void {
+    setAgentCollapsed(false);
+    if (!state.conversation) return;
+    composerDrafts.get({ projectId, conversationId: state.conversation.id }).insertPrompt(text);
+  }
+
+  const agentIsCollapsed = !isGodotProject && agentCollapsed;
+  const viewerCollapsed = isGodotProject && !godotWorkspaceOpen && !designOpen;
+
+  return (
+    <WorkspaceShell chatLayout={chatLayout} agentCollapsed={agentIsCollapsed} viewerCollapsed={viewerCollapsed}
+      onHome={requestHome} onExpandAgent={() => setAgentCollapsed(false)}
+      agent={<WorkspaceAgentPane bodyRef={timeline} onScroll={(event) => {
+        const element = event.currentTarget;
+        followTimeline.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+      }} actions={<>
+            <button
+              className="icon-button pane-header-action"
+              type="button"
+              disabled={!project || creatingConversation}
+              onClick={() => void newConversation()}
+              title="New conversation"
+              aria-label="New conversation"
+            >
+              {creatingConversation ? <LoaderCircle className="spin" size={14} /> : <MessageSquarePlus size={14} />}
+            </button>
+            <ConversationMenu
+              conversations={conversations}
+              currentConversationId={conversation?.id}
+              activeConversationId={activeTurn?.conversationId}
+              disabled={!conversation}
+              onRename={rename}
+              onSelect={onOpenConversation}
+            />
+            {viewerCollapsed ? (
+              <button
+                className="icon-button pane-header-action"
+                type="button"
+                onClick={() => setGodotWorkspaceVisibility(true)}
+                title="Show workspace"
+                aria-label="Show workspace"
+              >
+                <PanelToggle size={14} />
+              </button>
+            ) : !isGodotProject ? (
+              <button
+                className="icon-button pane-header-action"
+                type="button"
+                onClick={() => setAgentCollapsed(true)}
+                title="Hide agent"
+                aria-label="Hide agent"
+              >
+                <PanelToggle size={14} />
+              </button>
+            ) : null}
+      </>}>
+          <div className="timeline" aria-live="polite">
+            {state.phase === "loading" ? <TimelineSkeleton /> : null}
+            <Activity mode={agentIsCollapsed ? "hidden" : "visible"}>
+              <ErrorBoundary label="Conversation" resetKey={conversation?.id}>
+              <AgentTimeline
+                turns={state.turns}
+                projectId={projectId}
+                workspacePath={project?.workspacePath}
+                onOpenWorkspaceFile={project ? openWorkspaceFile : undefined}
+                revisionDisabled={agentBusy || state.plan.mode !== "normal" || state.pendingPrompts.length > 0 || state.connection !== "open"}
+                waitingForInput={Boolean(questionnaire)}
+                onRevise={revisePrompt}
+                onAddToChat={addToChat}
+              />
+              </ErrorBoundary>
+            </Activity>
+          </div>
+
+          {questionnaire ? (
+            <QuestionnaireCard
+              request={questionnaire}
+              onSubmit={(answers) => respondToQuestionnaire(answers)}
+              onSkip={() => respondToQuestionnaire([], true)}
+            />
+          ) : null}
+
+          {state.plan.mode === "awaiting_approval" ? (
+            <div className="plan-review">
+              <PlanApprovalCard
+                disabled={agentBusy || state.connection !== "open"}
+                onApprove={executePlan}
+                onRefine={refineCurrentPlan}
+                onCancel={discardPlan}
+              />
+            </div>
+          ) : null}
+
+          {initialPrompt && initialPrompt.generation !== runtime.generation && !initialPromptAttempted.current ? <div className="paused-initial-prompt" role="status">
+            <p>Your initial message was paused while the service restarted.</p>
+            <details><summary>Review message</summary><pre>{initialPrompt.prompt}</pre>
+              {initialPrompt.images.length || initialPrompt.attachments?.length ? <p>{initialPrompt.images.length + (initialPrompt.attachments?.length ?? 0)} attachments retained</p> : null}
+            </details>
+            <button type="button" disabled={runtime.status !== "ready" || state.connection !== "open" || !conversation || conversation.id !== conversationId} onClick={sendInitialPrompt}>Send original message</button>
+          </div> : null}
+          {!questionnaire && state.plan.mode !== "awaiting_approval" ? <Composer
+            key={conversation?.id}
+            projectId={project?.id}
+            conversationId={conversation?.id}
+            supportsDesign={project?.type !== "asset-canvas"}
+            conversationReady={Boolean(conversation) && state.connection === "open"}
+            running={currentConversationBusy}
+            stopping={state.agent.status === "cancelling" || sendingInitialPrompt}
+            pendingPrompts={state.pendingPrompts}
+            plan={activePlan}
+            planMode={state.plan.mode}
+            notice={state.connection === "reconnecting" ? "Connection lost. Reconnecting..." : state.notice}
+            models={modelCatalog.models}
+            modelStatus={modelCatalog.status}
+            model={effectiveModel}
+            reasoningLevel={state.settings.reasoningLevel}
+            modelChanging={modelChanging}
+            promptHistory={[
+              ...items.flatMap((item) => item.type === "userMessage" && item.text.trim()
+                ? [{ prompt: item.text, mentions: item.mentions ?? [] }]
+                : []),
+              ...state.pendingPrompts.flatMap((item) => item.prompt.trim()
+                ? [{ prompt: item.prompt, mentions: item.mentions }]
+                : []),
+            ]}
+            capabilities={capabilities}
+            initialDraft={conversation?.id === conversationId ? initialDraft : undefined}
+            onInitialDraftHandled={onInitialDraftHandled}
+            onSubmit={submitPrompt}
+            contexts={chatContexts}
+            onRemoveContext={(key) => {
+              if (key === designChipKey) setDismissedDesign(key);
+              else if (key === playableChat?.surface?.key) setDismissedSurface(key);
+              else playableChat?.removeAttachment(key);
+            }}
+            onCompact={compactCurrentConversation}
+            onContextUsage={currentContextPercent}
+            onCancelPlan={discardPlan}
+            onModelChange={(model) => void changeModel(model)}
+            onReasoningChange={(level) => void changeReasoning(level)}
+            onStop={() => void stopAgent()}
+            onRemovePending={removeFollowUp}
+            onSteerPending={steerFollowUp}
+            onEditPending={editFollowUp}
+          /> : null}
+      </WorkspaceAgentPane>}
+    >
+      <ErrorBoundary label="Workspace" resetKey={project?.id} onHome={onHome}>
+      {!project ? <section className="viewer-pane" /> : project.type !== "interactive-story" && project.type !== "asset-canvas" ? (
+        <CodingWorkspace
+          project={project}
+          agentBusy={agentBusy}
+          publishing={publishing}
+          workspaceRevision={workspaceRevision}
+          previewPaused={previewPaused}
+          openFileRequest={openFileRequest}
+          onPublish={publish}
+          publishDialog={publishDialogStatus}
+          onOpenPublish={() => setPublishDialog({ projectId: project.id, status: "open" })}
+          onClosePublish={() => setPublishDialog(undefined)}
+          onRestart={restartPreview}
+          onStop={async () => {
+            try { await stopPreview(project.id); } catch (cause) { dispatch({ type: "notice", message: errorMessage(cause) }); }
+          }}
+          onAskAgent={requestPrompt}
+          designOpen={designOpen}
+          onDesignOpenChange={changeWorkspaceView}
+          onDesignSaveReady={registerDesignSave}
+          onDesignContextChange={setDesignContext}
+          onProjectUpdated={(updated) => dispatch({ type: "project-updated", project: updated })}
+          onClose={isGodotProject ? () => setGodotWorkspaceVisibility(false) : undefined}
+          chatOnRight={chatLayout === "right"}
+          chatCollapsed={agentIsCollapsed}
+          onHome={requestHome}
+          onToggleChat={isGodotProject ? undefined : () => setAgentCollapsed((collapsed) => !collapsed)}
+        />
+      ) : project.type === "asset-canvas" ? <Suspense fallback={<div className="design-loading"><LoaderCircle className="spin" size={18} /></div>}><CanvasWorkspace
+        project={project}
+        onProjectUpdated={(updated) => dispatch({ type: "project-updated", project: updated })}
+        workspaceRevision={workspaceRevision}
+        openFileRequest={openFileRequest}
+        initialNodeId={initialCanvasNodeId}
+        onInitialNodeHandled={onInitialCanvasNodeHandled}
+        onSaveReady={registerDesignSave}
+        onContextChange={setDesignContext}
+        chatOnRight={chatLayout === "right"}
+        chatCollapsed={agentIsCollapsed}
+        onHome={requestHome}
+        onToggleChat={() => setAgentCollapsed((collapsed) => !collapsed)}
+      /></Suspense> : <PlayableEditorWorkspace
+        project={project}
+        onProjectUpdated={(updated) => dispatch({ type: "project-updated", project: updated })}
+        designOpen={designOpen}
+        onDesignOpenChange={changeWorkspaceView}
+        onDesignSaveReady={registerDesignSave}
+        onDesignContextChange={setDesignContext}
+        agentBusy={agentBusy}
+        publishing={publishing}
+        workspaceRevision={workspaceRevision}
+        openFileRequest={openFileRequest}
+        onPublish={publish}
+        publishDialog={publishDialogStatus}
+        onOpenPublish={() => setPublishDialog({ projectId: project.id, status: "open" })}
+        onClosePublish={() => setPublishDialog(undefined)}
+        chatOnRight={chatLayout === "right"}
+        chatCollapsed={agentIsCollapsed}
+        onHome={requestHome}
+        onToggleChat={() => setAgentCollapsed((collapsed) => !collapsed)}
+        onChatContextChange={setPlayableChat}
+        onAskAgent={requestPrompt}
+        onSendToAgent={sendEditorRequest}
+      />}
+      </ErrorBoundary>
+    </WorkspaceShell>
+  );
+}
+
+function TimelineSkeleton() {
+  return (
+    <div className="timeline-skeleton" aria-label="Loading project">
+      <span />
+      <span />
+      <span />
+    </div>
+  );
+}
+
+function FatalState({ message, onHome }: { message: string; onHome: () => void }) {
+  return (
+    <main className="fatal-state">
+      <X size={24} />
+      <h1>Workspace unavailable</h1>
+      <p>{message}</p>
+      <div className="fatal-actions">
+        <button type="button" onClick={onHome}><ArrowLeft size={15} />Home</button>
+        <button type="button" onClick={() => window.location.reload()}><RefreshCw size={15} />Reload</button>
+      </div>
+    </main>
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function initialConversationModel(): Promise<AgentModelRef | undefined> {
+  try {
+    const catalog = await listModels();
+    return catalog.defaultModel ?? catalog.models[0];
+  } catch {
+    return undefined;
+  }
+}
+
+function readGodotWorkspaceOpen(): boolean {
+  // Open unless the user hid it; storage may be unavailable.
+  try { return localStorage.getItem(GODOT_WORKSPACE_OPEN_STORAGE_KEY) !== "false"; } catch { return true; }
+}

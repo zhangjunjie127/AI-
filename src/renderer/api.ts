@@ -1,0 +1,1858 @@
+import {
+  runtimeConnection,
+  subscribeRuntimeConnection,
+} from "./runtime-connection.js";
+import type { DesktopRuntimeService } from "../shared/desktop-runtime.js";
+import {
+  RUNTIME_EVENT_TYPES,
+  type AgentContextUsage,
+  type AnswerQuestionnaireRequest,
+  type AgentModelCatalog,
+  type AgentModelRef,
+  type AgentReasoningLevel,
+  type ConversationAgentSettings,
+  type ConversationCapabilities,
+  type CreateLibraryImageRequest,
+  type LibraryAsset,
+  type LibraryAssetPurpose,
+  type LibraryAssetSummary,
+  type LibraryUploadMediaType,
+  type MediaModelDefaults,
+  type ImageModel,
+  type ImageModelCatalog,
+  type ImageModelRef,
+  type ModelAuthEvent,
+  type ModelAuthMethod,
+  type ModelProviderEndpointSettings,
+  type ProviderModelSettings,
+  type Model3DDefinition,
+  type CustomProviderModel,
+  type CustomProviderDetails,
+  type SaveCustomProviderRequest,
+  type DiscoverProviderModelsRequest,
+  type DiscoveredProviderModels,
+  type ProviderSummary,
+  type CreateProjectRequest,
+  type CommunityGame,
+  type ConversationDetail,
+  type ConversationSummary,
+  type ProjectRunSettings,
+  type ProjectFileOpenMode,
+  type ProjectAgentActivity,
+  type ProjectCoverMode,
+  type ProjectCoverState,
+  type ProjectState,
+  type UpdateAgentDefaultsRequest,
+  type PublishProjectRequest,
+  type PublishResult,
+  type RuntimeEvent,
+  type RunToolRequest,
+  type ToolId,
+  type ToolJob,
+  type ToolJobContext,
+  type VideoModel,
+  type PromptImage,
+  type PromptAttachment,
+  type PluginMention,
+  type PromptMode,
+  type PromptContext,
+  type PromptReference,
+  type PromptResponse,
+  type WorkspaceFile,
+  type WorkspaceFileContent,
+  type MediaModelCatalog,
+  type Model3DModel,
+  type Model3DAnimationAction,
+} from "../shared/contracts.js";
+import type { DesktopUpdateState } from "../shared/desktop-update.js";
+import type { ExampleSummary } from "../shared/examples.js";
+import type { PlaytestWatchState } from "../shared/playtest.js";
+import type { NodeRuntimeResponse } from "../shared/playable-player-protocol.js";
+import type {
+  NodeCodebaseDetail,
+  NodeCodebaseUpdate,
+} from "../shared/playable-codebase.js";
+import type {
+  PlayableAddedNode,
+  PlayablePresetSummary,
+  PlayableProjectValidationResult as PlayableProjectValidation,
+  PlayableThumbnailManifest,
+} from "../shared/playable-editor.js";
+import type {
+  InstallPluginRequest,
+  PluginCatalog,
+  PluginDetail,
+  PluginInstallInspection,
+  PluginSettings,
+  PluginSkillContent,
+} from "../shared/plugins.js";
+import type {
+  UpdateWebSearchSettings,
+  WebSearchSettings,
+} from "../shared/web-search.js";
+import type { DesktopClipboardFile } from "../shared/file-transfer.js";
+import type { WebGamePlayerBridge } from "../shared/web-game-player.js";
+import type {
+  NetworkConnectionTest,
+  NetworkSettings,
+  NetworkSettingsState,
+} from "../shared/network-settings.js";
+import { composerDrafts } from "./composer-drafts.js";
+
+const API_BASE = "/api";
+
+export function getNetworkSettings(): Promise<NetworkSettingsState> {
+  return request("/settings/network");
+}
+
+export function updateNetworkSettings(
+  settings: NetworkSettings,
+): Promise<NetworkSettingsState> {
+  return request("/settings/network", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+}
+
+export function detectNetworkProxy(): Promise<NetworkSettingsState> {
+  return request("/settings/network/detect", { method: "POST" });
+}
+
+export function testNetworkConnection(
+  settings: NetworkSettings,
+): Promise<NetworkConnectionTest> {
+  return request("/settings/network/test", {
+    method: "POST",
+    body: JSON.stringify(settings),
+  });
+}
+
+interface DesktopRuntime {
+  daemonUrl: string;
+  token: string;
+}
+
+declare global {
+  interface Window {
+    putengGameDesktop?: {
+      platform: string;
+      runtime: DesktopRuntime;
+      fonts: {
+        list: () => Promise<string[]>;
+        onChanged: (listener: (fonts: string[]) => void) => () => void;
+      };
+      runtimeService?: DesktopRuntimeService;
+      openExternal: (url: string) => Promise<void>;
+      setAppearance: (appearance: "system" | "light" | "dark") => Promise<void>;
+      restartApp?: () => Promise<void>;
+      onPrepareClose?: (listener: () => Promise<void>) => () => void;
+      onCancelClose?: (listener: (error: string) => void) => () => void;
+      windowMenu?: {
+        icon: () => Promise<string>;
+        popup: (label: string, x: number, y: number) => Promise<void>;
+      };
+      openProjectFile: (
+        projectId: string,
+        filePath: string,
+        mode?: ProjectFileOpenMode,
+      ) => Promise<void>;
+      browsePluginDirectory: (pluginId: string) => Promise<void>;
+      revealPluginSkill: (pluginId: string, skillId: string) => Promise<void>;
+      selectPluginDirectory: () => Promise<string | undefined>;
+      selectProjectDirectory: () => Promise<string | undefined>;
+      clipboard: {
+        files: () => Promise<DesktopClipboardFile[]>;
+        paste: () => Promise<void>;
+      };
+      capturePage: (bounds: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      }) => Promise<Uint8Array>;
+      /** Captures a Node's thumbnail in a hidden window; `false` when it could not. */
+      captureNodeThumbnail?: (
+        projectId: string,
+        nodeId: string,
+        viewport: { width: number; height: number },
+        batchId: string,
+      ) => Promise<boolean>;
+      /** Cancels active and queued captures in a batch. */
+      cancelNodeThumbnails?: (batchId: string) => Promise<void>;
+      /** Called by the hidden thumbnail window once its capture is stored or failed. */
+      finishNodeThumbnail?: (captured: boolean) => Promise<void>;
+      openPlaytest: (
+        projectId: string,
+        viewport: { width: number; height: number },
+      ) => Promise<void>;
+      webGamePlayer?: WebGamePlayerBridge;
+      /** Called from a Playtest window: shows the Node in the main window's editor. */
+      openPlayableNode?: (projectId: string, nodeId: string) => Promise<void>;
+      /** Called in the main window when a Playtest asks to open a Node. */
+      onOpenPlayableNode?: (
+        listener: (projectId: string, nodeId: string) => void,
+      ) => () => void;
+      agentPlaytests?: {
+        state: () => Promise<PlaytestWatchState>;
+        setVisible: (visible: boolean) => Promise<PlaytestWatchState>;
+        onState: (listener: (state: PlaytestWatchState) => void) => () => void;
+      };
+      updates: {
+        state: () => Promise<DesktopUpdateState | null>;
+        check: () => Promise<void>;
+        download: () => Promise<void>;
+        install: () => Promise<void>;
+        onState: (listener: (state: DesktopUpdateState) => void) => () => void;
+      };
+      auth: {
+        callbackUrl: () => Promise<string>;
+        cancel: () => Promise<void>;
+        openUrl: (url: string) => Promise<void>;
+        takeCallback: () => Promise<string | undefined>;
+        onCallback: (listener: () => void) => () => void;
+      };
+    };
+  }
+}
+
+export async function createProject(
+  input: CreateProjectRequest = {},
+): Promise<ProjectState> {
+  return request("/projects", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function listProjects(): Promise<ProjectState[]> {
+  return request("/projects");
+}
+
+export async function listProjectActivity(
+  signal?: AbortSignal,
+): Promise<ProjectAgentActivity[]> {
+  return request("/projects/activity", { signal });
+}
+
+export async function listExamples(): Promise<ExampleSummary[]> {
+  return request("/examples");
+}
+
+export async function playExample(exampleId: string): Promise<{ url: string }> {
+  return request(`/examples/${encodeURIComponent(exampleId)}/play`, {
+    method: "POST",
+  });
+}
+
+export async function getExampleCover(
+  exampleId: string,
+): Promise<Blob | undefined> {
+  const response = await fetch(
+    apiUrl(`/examples/${encodeURIComponent(exampleId)}/cover`),
+    { headers: runtimeHeaders() },
+  );
+  if (response.status === 404) return undefined;
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
+export async function renameProject(
+  projectId: string,
+  name: string,
+): Promise<ProjectState> {
+  return request(`/projects/${projectId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function updateProjectStartupDirectory(
+  projectId: string,
+  startupDirectory: string,
+): Promise<ProjectState> {
+  return request(`/projects/${projectId}/settings/startup-directory`, {
+    method: "PUT",
+    body: JSON.stringify({ startupDirectory }),
+  });
+}
+
+export async function updateProjectRunSettings(
+  projectId: string,
+  input: ProjectRunSettings,
+): Promise<ProjectState> {
+  return request(`/projects/${projectId}/settings/run`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function duplicateProject(
+  projectId: string,
+): Promise<ProjectState> {
+  return request(`/projects/${projectId}/duplicate`, { method: "POST" });
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  await request(`/projects/${projectId}`, { method: "DELETE" });
+  composerDrafts.deleteProject(projectId);
+}
+
+export async function listModels(): Promise<AgentModelCatalog> {
+  return request("/models");
+}
+
+export async function updateAgentDefaults(
+  input: UpdateAgentDefaultsRequest,
+): Promise<void> {
+  await request("/models/default", {
+    method: "PUT",
+    body: JSON.stringify({
+      model: modelRef(input.model),
+      reasoningLevel: input.reasoningLevel,
+    }),
+  });
+}
+
+export const MODELS_CHANGED_EVENT = "putenggame-models-changed";
+export async function syncCloudSession(
+  session: { accessToken: string; userId: string } | null,
+): Promise<void> {
+  await request("/cloud/session", {
+    method: "PUT",
+    body: JSON.stringify(session),
+  });
+  notifyAgentModelsChanged();
+}
+export async function getCloudQuotas(): Promise<
+  import("../shared/cloud-models.js").CloudQuotaSnapshot | null
+> {
+  return request("/cloud/quotas");
+}
+
+export function notifyAgentModelsChanged(): void {
+  window.dispatchEvent(new Event(MODELS_CHANGED_EVENT));
+}
+
+export async function listProviders(): Promise<ProviderSummary[]> {
+  return request("/settings/providers");
+}
+
+export async function setProviderEnabled(
+  providerId: string,
+  enabled: boolean,
+): Promise<ProviderSummary> {
+  const result = await request<ProviderSummary>(
+    `/settings/models/providers/${encodeURIComponent(providerId)}/enabled`,
+    { method: "PATCH", body: JSON.stringify({ enabled }) },
+  );
+  notifyAgentModelsChanged();
+  return result;
+}
+
+export async function getCustomProvider(
+  providerId: string,
+): Promise<CustomProviderDetails> {
+  return request(
+    `/settings/models/providers/${encodeURIComponent(providerId)}/custom`,
+  );
+}
+
+export async function discoverCustomProviderModels(
+  settings: DiscoverProviderModelsRequest,
+  signal?: AbortSignal,
+): Promise<DiscoveredProviderModels> {
+  return request("/settings/models/providers/discover", {
+    method: "POST",
+    body: JSON.stringify(settings),
+    signal,
+  });
+}
+
+export async function saveCustomProvider(
+  settings: SaveCustomProviderRequest,
+  providerId?: string,
+): Promise<CustomProviderDetails> {
+  const result = await request<CustomProviderDetails>(
+    providerId
+      ? `/settings/models/providers/${encodeURIComponent(providerId)}/custom`
+      : "/settings/models/providers/custom",
+    { method: providerId ? "PUT" : "POST", body: JSON.stringify(settings) },
+  );
+  notifyAgentModelsChanged();
+  return result;
+}
+
+export async function removeProvider(providerId: string): Promise<void> {
+  await request(
+    `/settings/models/providers/${encodeURIComponent(providerId)}`,
+    { method: "DELETE" },
+  );
+  notifyAgentModelsChanged();
+}
+
+export async function getProviderModels(
+  providerId: string,
+): Promise<ProviderModelSettings> {
+  return request(
+    `/settings/models/providers/${encodeURIComponent(providerId)}/models`,
+  );
+}
+
+export async function setProviderModelVisibility(
+  providerId: string,
+  ids: string[],
+  visible: boolean,
+): Promise<ProviderModelSettings> {
+  const result = await request<ProviderModelSettings>(
+    `/settings/models/providers/${encodeURIComponent(providerId)}/models/visibility`,
+    { method: "PUT", body: JSON.stringify({ ids, visible }) },
+  );
+  notifyAgentModelsChanged();
+  return result;
+}
+
+export async function addCustomProviderModel(
+  providerId: string,
+  model: CustomProviderModel | Model3DDefinition,
+): Promise<ProviderModelSettings> {
+  const result = await request<ProviderModelSettings>(
+    `/settings/models/providers/${encodeURIComponent(providerId)}/models/custom`,
+    { method: "POST", body: JSON.stringify(model) },
+  );
+  notifyAgentModelsChanged();
+  return result;
+}
+
+export async function updateProviderModel3D(
+  providerId: string,
+  model: Model3DDefinition,
+): Promise<ProviderModelSettings> {
+  const result = await request<ProviderModelSettings>(
+    `/settings/models/providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(model.id)}`,
+    { method: "PUT", body: JSON.stringify(model) },
+  );
+  notifyAgentModelsChanged();
+  return result;
+}
+
+export async function resetProviderModel3D(
+  providerId: string,
+  modelId: string,
+): Promise<ProviderModelSettings> {
+  const result = await request<ProviderModelSettings>(
+    `/settings/models/providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelId)}/overrides`,
+    { method: "DELETE" },
+  );
+  notifyAgentModelsChanged();
+  return result;
+}
+
+export async function removeCustomProviderModel(
+  providerId: string,
+  modelId: string,
+): Promise<ProviderModelSettings> {
+  const result = await request<ProviderModelSettings>(
+    `/settings/models/providers/${encodeURIComponent(providerId)}/models/custom/${encodeURIComponent(modelId)}`,
+    { method: "DELETE" },
+  );
+  notifyAgentModelsChanged();
+  return result;
+}
+
+export async function getOpenAIEndpointSettings(): Promise<ModelProviderEndpointSettings> {
+  return request("/settings/models/providers/openai/endpoint");
+}
+
+export async function updateOpenAIEndpointSettings(
+  baseUrl: string,
+): Promise<ModelProviderEndpointSettings> {
+  return request("/settings/models/providers/openai/endpoint", {
+    method: "PUT",
+    body: JSON.stringify({ baseUrl }),
+  });
+}
+
+export async function updateModel3DProviderApiKey(
+  providerId: string,
+  apiKey: string,
+): Promise<{ configured: boolean }> {
+  const result = await request<{ configured: boolean }>(
+    `/settings/models/providers/${encodeURIComponent(providerId)}`,
+    { method: "PUT", body: JSON.stringify({ apiKey }) },
+  );
+  notifyAgentModelsChanged();
+  return result;
+}
+export async function updateSeedanceApiKey(
+  providerId: string,
+  apiKey: string,
+): Promise<{ configured: boolean }> {
+  return request(
+    `/settings/models/providers/${encodeURIComponent(providerId)}/seedance-key`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ apiKey }),
+    },
+  );
+}
+
+export async function startModelProviderLogin(
+  providerId: string,
+  method: ModelAuthMethod,
+): Promise<string> {
+  const result = await request<{ operationId: string }>(
+    `/settings/models/providers/${encodeURIComponent(providerId)}/login`,
+    {
+      method: "POST",
+      body: JSON.stringify({ method }),
+    },
+  );
+  return result.operationId;
+}
+
+export async function respondToModelAuth(
+  operationId: string,
+  promptId: string,
+  value: string,
+): Promise<void> {
+  await request(
+    `/settings/model-auth/${encodeURIComponent(operationId)}/respond`,
+    {
+      method: "POST",
+      body: JSON.stringify({ promptId, value }),
+    },
+  );
+}
+
+export async function cancelModelAuth(operationId: string): Promise<void> {
+  await request(`/settings/model-auth/${encodeURIComponent(operationId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function subscribeToModelAuth(
+  operationId: string,
+  handlers: { onEvent: (event: ModelAuthEvent) => void; onError: () => void },
+): () => void {
+  const controller = new AbortController();
+  void streamModelAuthEvents(operationId, controller.signal, handlers);
+  return () => controller.abort();
+}
+
+export async function listImageModels(): Promise<ImageModel[]> {
+  return request("/image-models");
+}
+
+export async function listVideoModels(): Promise<VideoModel[]> {
+  return request("/video-models");
+}
+
+/** Image models grouped by connected provider, with the reason a provider has none. */
+export async function listImageModelCatalog(): Promise<ImageModelCatalog> {
+  return request("/image-models/catalog");
+}
+
+export async function setDefaultMediaModel(
+  usage: "image" | "video" | "3d",
+  model?: AgentModelRef,
+): Promise<void> {
+  const endpoint =
+    usage === "image"
+      ? "/image-models/default"
+      : usage === "video"
+        ? "/video-models/default"
+        : "/model3d-models/default";
+  await request(
+    endpoint,
+    model
+      ? { method: "PUT", body: JSON.stringify(model) }
+      : { method: "DELETE" },
+  );
+  notifyAgentModelsChanged();
+}
+
+export async function updateProjectMediaModelDefaults(
+  projectId: string,
+  defaults: MediaModelDefaults,
+): Promise<ProjectState> {
+  return request(
+    `/projects/${encodeURIComponent(projectId)}/settings/generation-models`,
+    { method: "PUT", body: JSON.stringify(defaults) },
+  );
+}
+
+export async function listVideoModelCatalog(): Promise<
+  MediaModelCatalog<VideoModel>
+> {
+  return request("/video-models/catalog");
+}
+
+export async function listModel3DCatalog(): Promise<
+  MediaModelCatalog<Model3DModel>
+> {
+  return request("/model3d-models/catalog");
+}
+
+/** Preset moves for rigged humanoids; empty until a 3D provider is set up. */
+export async function listModel3DAnimations(
+  model?: AgentModelRef,
+  options?: import("../shared/contracts.js").Model3DOptions,
+): Promise<Model3DAnimationAction[]> {
+  const query = new URLSearchParams({
+    ...(model ? { provider: model.provider, id: model.id } : {}),
+    ...(options?.rigModel ? { rigModel: options.rigModel } : {}),
+    ...(options?.rigType ? { rigType: options.rigType } : {}),
+  });
+  return request(`/model3d-animations?${query}`);
+}
+export async function listModel3DOperations(): Promise<Model3DModel[]> {
+  return request("/model3d-operations");
+}
+export async function model3DBalance(
+  model: AgentModelRef,
+): Promise<import("../shared/contracts.js").Model3DBalance> {
+  return request(
+    `/model3d-balance?${new URLSearchParams({ provider: model.provider, id: model.id })}`,
+  );
+}
+
+export async function getWebSearchSettings(): Promise<WebSearchSettings> {
+  return request("/settings/web-search");
+}
+
+export async function updateWebSearchSettings(
+  input: UpdateWebSearchSettings,
+): Promise<WebSearchSettings> {
+  return request("/settings/web-search", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function listExploreGames(): Promise<CommunityGame[]> {
+  return request("/community/games");
+}
+
+export async function getExploreGame(gameId: string): Promise<CommunityGame> {
+  return request(`/community/games/${encodeURIComponent(gameId)}`);
+}
+
+export async function getExploreGameCover(
+  gameId: string,
+  deploymentId: string,
+): Promise<Blob | undefined> {
+  const response = await fetch(
+    apiUrl(
+      `/community/games/${encodeURIComponent(gameId)}/deployments/${encodeURIComponent(deploymentId)}/cover`,
+    ),
+    { headers: runtimeHeaders() },
+  );
+  if (response.status === 404) return undefined;
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
+export async function listPlugins(): Promise<PluginCatalog> {
+  return request("/plugins");
+}
+
+export async function getHomeComposerCapabilities(): Promise<ConversationCapabilities> {
+  return request("/composer/capabilities");
+}
+
+export async function installPlugin(
+  input: InstallPluginRequest,
+): Promise<PluginDetail> {
+  return request("/plugins/install", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function inspectPluginSource(
+  input: InstallPluginRequest,
+): Promise<PluginInstallInspection> {
+  return request("/plugins/inspect", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function readPlugin(id: string): Promise<PluginDetail> {
+  return request(`/plugins/${encodeURIComponent(id)}`);
+}
+
+export async function readPluginSkill(
+  pluginId: string,
+  skillId: string,
+): Promise<PluginSkillContent> {
+  return request(
+    `/plugins/${encodeURIComponent(pluginId)}/skill-content?id=${encodeURIComponent(skillId)}`,
+  );
+}
+
+export async function updatePluginSettings(
+  id: string,
+  settings: PluginSettings,
+): Promise<PluginDetail> {
+  return request(`/plugins/${encodeURIComponent(id)}/settings`, {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+}
+
+export async function uninstallPlugin(id: string): Promise<void> {
+  await request(`/plugins/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function startToolJob(
+  toolId: ToolId,
+  input: RunToolRequest,
+  title?: string,
+  context?: ToolJobContext,
+): Promise<ToolJob> {
+  return request(`/tools/${toolId}/jobs`, {
+    method: "POST",
+    body: JSON.stringify({
+      ...input,
+      ...(title ? { title } : {}),
+      ...(context
+        ? { projectId: context.projectId, nodeId: context.nodeId }
+        : {}),
+    }),
+  });
+}
+
+export async function listToolJobs(): Promise<ToolJob[]> {
+  return request("/tool-jobs");
+}
+
+export async function cancelToolJob(jobId: string): Promise<ToolJob> {
+  return request(`/tool-jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST",
+  });
+}
+
+export async function retryToolJob(jobId: string): Promise<ToolJob> {
+  return request(`/tool-jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: "POST",
+  });
+}
+
+export async function publishProject(
+  projectId: string,
+  accessToken: string,
+  metadata: Omit<PublishProjectRequest, "accessToken">,
+): Promise<PublishResult> {
+  const body: PublishProjectRequest = { accessToken, ...metadata };
+  return request(`/projects/${projectId}/publish`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function buildInteractiveStory(projectId: string): Promise<Blob> {
+  const response = await fetch(
+    apiUrl(`/projects/${projectId}/interactive-story/build`),
+    {
+      method: "POST",
+      headers: runtimeHeaders(),
+    },
+  );
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
+export async function waitForRuntime(timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      await request<{ status: "ok" }>("/health");
+      return;
+    } catch {
+      await delay(200);
+    }
+  }
+  throw new Error("Could not reach the local runtime");
+}
+
+export async function getProject(projectId: string): Promise<ProjectState> {
+  return request(`/projects/${projectId}`);
+}
+
+export async function ensureProjectPreview(
+  projectId: string,
+): Promise<{ url: string; title: string }> {
+  return request(`/projects/${encodeURIComponent(projectId)}/preview?reuse=1`, {
+    method: "POST",
+  });
+}
+
+export async function getNodeRuntime(
+  projectId: string,
+): Promise<NodeRuntimeResponse> {
+  return request(`/projects/${projectId}/playable`);
+}
+
+export async function getNodeCodebase(
+  projectId: string,
+): Promise<NodeCodebaseDetail> {
+  return request(`/projects/${projectId}/playable/codebase`);
+}
+
+export async function getPlayableValidation(
+  projectId: string,
+  mode: "draft" | "publish" = "draft",
+): Promise<PlayableProjectValidation> {
+  return request(`/projects/${projectId}/playable/validation?mode=${mode}`);
+}
+
+export async function listPlayablePresets(): Promise<{
+  presets: PlayablePresetSummary[];
+}> {
+  return request("/playable/presets");
+}
+
+export async function addPlayableNode(
+  projectId: string,
+  body: {
+    preset: string;
+    id: string;
+    title?: string;
+    position?: { x: number; y: number };
+  },
+): Promise<PlayableAddedNode> {
+  return request(`/projects/${projectId}/playable/nodes`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function listPlayableThumbnails(
+  projectId: string,
+): Promise<PlayableThumbnailManifest> {
+  const { thumbnails } = await request<{
+    thumbnails: PlayableThumbnailManifest;
+  }>(`/projects/${projectId}/playable/thumbnails`);
+  return thumbnails;
+}
+
+export async function getPlayableThumbnail(
+  projectId: string,
+  nodeId: string,
+): Promise<Blob | undefined> {
+  const response = await fetch(
+    apiUrl(
+      `/projects/${projectId}/playable/thumbnails/${encodeURIComponent(nodeId)}`,
+    ),
+    { headers: runtimeHeaders() },
+  );
+  if (response.status === 404) return undefined;
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
+export async function setPlayableThumbnail(
+  projectId: string,
+  nodeId: string,
+  hash: string,
+  image: Blob,
+): Promise<void> {
+  const response = await fetch(
+    apiUrl(
+      `/projects/${projectId}/playable/thumbnails/${encodeURIComponent(nodeId)}?hash=${encodeURIComponent(hash)}`,
+    ),
+    {
+      method: "PUT",
+      headers: { "content-type": "image/webp", ...runtimeHeaders() },
+      body: image,
+    },
+  );
+  if (!response.ok) throw await responseError(response);
+}
+
+/** Rejects with status 409 when the project changed since `codebase.revision` was read. */
+export async function updateNodeCodebase(
+  projectId: string,
+  codebase: NodeCodebaseUpdate & { revision: string },
+): Promise<{ revision: string }> {
+  return request(`/projects/${projectId}/playable/codebase`, {
+    method: "PUT",
+    body: JSON.stringify(codebase),
+  });
+}
+
+export async function getProjectCover(
+  projectId: string,
+): Promise<Blob | undefined> {
+  const response = await fetch(apiUrl(`/projects/${projectId}/cover`), {
+    headers: runtimeHeaders(),
+  });
+  if (response.status === 404) return undefined;
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
+export async function getProjectCoverState(
+  projectId: string,
+): Promise<ProjectCoverState> {
+  return request(`/projects/${projectId}/cover/state`);
+}
+
+export async function setProjectCover(
+  projectId: string,
+  cover: Blob,
+  source: ProjectCoverMode = "custom",
+): Promise<void> {
+  const suffix = source === "auto" ? "?source=auto" : "";
+  const response = await fetch(
+    apiUrl(`/projects/${projectId}/cover${suffix}`),
+    {
+      method: "PUT",
+      headers: { "content-type": "image/webp", ...runtimeHeaders() },
+      body: cover,
+    },
+  );
+  if (!response.ok) throw await responseError(response);
+}
+
+export async function restoreAutomaticProjectCover(
+  projectId: string,
+): Promise<void> {
+  await request(`/projects/${projectId}/cover`, { method: "DELETE" });
+}
+
+export async function listWorkspaceFiles(
+  projectId: string,
+): Promise<WorkspaceFile[]> {
+  return request(`/projects/${projectId}/files`);
+}
+
+export async function createWorkspaceEntry(
+  projectId: string,
+  parent: string,
+  name: string,
+  kind: "file" | "folder",
+): Promise<{ path: string }> {
+  return request(`/projects/${encodeURIComponent(projectId)}/files`, {
+    method: "POST",
+    body: JSON.stringify({ parent, name, kind }),
+  });
+}
+
+export async function renameWorkspaceEntry(
+  projectId: string,
+  filePath: string,
+  name: string,
+): Promise<{ path: string }> {
+  return request(
+    `/projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(filePath)}`,
+    { method: "PATCH", body: JSON.stringify({ name }) },
+  );
+}
+
+export async function deleteWorkspaceEntry(
+  projectId: string,
+  filePath: string,
+): Promise<void> {
+  await request(
+    `/projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(filePath)}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function saveProjectAssetToLibrary(
+  projectId: string,
+  filePath: string,
+): Promise<LibraryAsset> {
+  return request(
+    `/projects/${encodeURIComponent(projectId)}/assets/library?path=${encodeURIComponent(filePath)}`,
+    { method: "POST" },
+  );
+}
+
+export async function saveLibraryAsset(assetId: string): Promise<LibraryAsset> {
+  return request(`/library/assets/${encodeURIComponent(assetId)}/save`, {
+    method: "POST",
+  });
+}
+
+export async function listLibraryAssets(): Promise<LibraryAssetSummary[]> {
+  return request("/library/assets");
+}
+
+export async function createLibraryImage(
+  input: CreateLibraryImageRequest,
+): Promise<LibraryAsset> {
+  return request("/library/assets", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function uploadLibraryAsset(
+  file: File,
+  mediaType: LibraryUploadMediaType,
+  duration?: number,
+  purpose?: LibraryAssetPurpose,
+): Promise<LibraryAsset> {
+  const query = new URLSearchParams({ name: file.name, mediaType });
+  if (duration !== undefined) query.set("duration", String(duration));
+  if (purpose !== undefined) query.set("purpose", purpose);
+  return request(`/library/assets/upload?${query}`, {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: file,
+  });
+}
+
+export async function getLibraryAsset(assetId: string): Promise<Blob> {
+  const response = await fetch(
+    apiUrl(`/library/assets/${encodeURIComponent(assetId)}/content`),
+    { headers: runtimeHeaders() },
+  );
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
+/** Copies a Library asset into the project's `assets/imported/` folder; sending the same asset again returns the existing file. */
+export async function addLibraryAssetToProject(
+  projectId: string,
+  assetId: string,
+): Promise<{ path: string; assetId: string }> {
+  return request(
+    `/projects/${encodeURIComponent(projectId)}/library-assets/${encodeURIComponent(assetId)}`,
+    { method: "POST" },
+  );
+}
+
+export async function renameLibraryAsset(
+  assetId: string,
+  name: string,
+): Promise<LibraryAsset> {
+  return request(`/library/assets/${encodeURIComponent(assetId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteLibraryAsset(assetId: string): Promise<void> {
+  await request(`/library/assets/${encodeURIComponent(assetId)}`, {
+    method: "DELETE",
+  });
+}
+
+export interface LibraryAssetReference {
+  id: string;
+  name: string;
+  type: ProjectState["type"];
+}
+
+export async function listLibraryAssetReferences(
+  assetId: string,
+): Promise<LibraryAssetReference[]> {
+  return request(`/library/assets/${encodeURIComponent(assetId)}/references`);
+}
+
+export async function forceDeleteLibraryAsset(assetId: string): Promise<void> {
+  await request(`/library/assets/${encodeURIComponent(assetId)}?force=true`, {
+    method: "DELETE",
+  });
+}
+
+export async function getWorkspaceFile(
+  projectId: string,
+  filePath: string,
+): Promise<WorkspaceFileContent> {
+  return request(
+    `/projects/${projectId}/files/content?path=${encodeURIComponent(filePath)}`,
+  );
+}
+
+export async function getConversationImage(
+  url: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  if (
+    !/^\/projects\/[^/]+\/conversation-images\/[a-f0-9]{64}\.(png|jpg|webp|gif)$/.test(
+      url,
+    )
+  ) {
+    throw new Error("Invalid conversation image reference");
+  }
+  const response = await fetch(apiUrl(url), {
+    headers: runtimeHeaders(),
+    signal,
+  });
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
+export async function getWorkspaceAsset(
+  projectId: string,
+  filePath: string,
+): Promise<Blob> {
+  const response = await fetch(
+    apiUrl(
+      `/projects/${projectId}/files/raw?path=${encodeURIComponent(filePath)}`,
+    ),
+    {
+      headers: runtimeHeaders(),
+    },
+  );
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
+export async function listConversations(
+  projectId: string,
+): Promise<ConversationSummary[]> {
+  return request(`/projects/${projectId}/conversations`);
+}
+
+export async function createConversation(
+  projectId: string,
+  model?: AgentModelRef,
+  reasoningLevel?: AgentReasoningLevel,
+): Promise<ConversationSummary> {
+  return request(`/projects/${projectId}/conversations`, {
+    method: "POST",
+    body: JSON.stringify({
+      ...(model ? { model: modelRef(model) } : {}),
+      ...(reasoningLevel ? { reasoningLevel } : {}),
+    }),
+  });
+}
+
+export async function getConversation(
+  projectId: string,
+  conversationId: string,
+  reset = false,
+): Promise<ConversationDetail> {
+  return request(
+    `/projects/${projectId}/conversations/${conversationId}${reset ? "?reset=1" : ""}`,
+  );
+}
+
+export async function renameConversation(
+  projectId: string,
+  conversationId: string,
+  title: string,
+): Promise<ConversationSummary> {
+  return request(`/projects/${projectId}/conversations/${conversationId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function setConversationModel(
+  projectId: string,
+  conversationId: string,
+  model: AgentModelRef,
+): Promise<ConversationAgentSettings> {
+  return request(
+    `/projects/${projectId}/conversations/${conversationId}/model`,
+    {
+      method: "PUT",
+      body: JSON.stringify(modelRef(model)),
+    },
+  );
+}
+
+export async function setConversationReasoning(
+  projectId: string,
+  conversationId: string,
+  level: AgentReasoningLevel,
+): Promise<AgentReasoningLevel> {
+  const result = await request<{ level: AgentReasoningLevel }>(
+    `/projects/${projectId}/conversations/${conversationId}/reasoning`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ level }),
+    },
+  );
+  return result.level;
+}
+
+export async function startPreview(
+  projectId: string,
+  reinstall = false,
+): Promise<{ url: string }> {
+  return request(
+    `/projects/${projectId}/preview${reinstall ? "?reinstall=1" : ""}`,
+    { method: "POST" },
+  );
+}
+
+export async function sendPrompt(
+  projectId: string,
+  conversationId: string,
+  prompt: string,
+  references: PromptReference[] = [],
+  images: PromptImage[] = [],
+  mode: PromptMode = "normal",
+  mentions: PluginMention[] = [],
+  attachments: PromptAttachment[] = [],
+  contexts: PromptContext[] = [],
+): Promise<PromptResponse> {
+  return request(
+    `/projects/${projectId}/conversations/${conversationId}/turns`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        prompt,
+        ...(mode === "planning" ? { mode } : {}),
+        ...(mentions.length ? { mentions } : {}),
+        ...(references.length ? { references } : {}),
+        ...(images.length ? { images } : {}),
+        ...(attachments.length
+          ? {
+              attachments: attachments.map(({ id, batchId }) => ({
+                id,
+                batchId,
+              })),
+            }
+          : {}),
+        ...(contexts.length ? { contexts } : {}),
+      }),
+    },
+  );
+}
+
+export async function uploadProjectAttachment(
+  projectId: string,
+  batchId: string,
+  file: File,
+  relativePath?: string,
+): Promise<PromptAttachment> {
+  const query = new URLSearchParams({ batchId, name: file.name });
+  if (relativePath) query.set("relativePath", relativePath);
+  const response = await fetch(
+    apiUrl(`/projects/${encodeURIComponent(projectId)}/attachments?${query}`),
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/vnd.putenggame.attachment",
+        ...runtimeHeaders(),
+      },
+      body: file,
+    },
+  );
+  if (!response.ok) throw await responseError(response);
+  return response.json() as Promise<PromptAttachment>;
+}
+
+export async function compactConversation(
+  projectId: string,
+  conversationId: string,
+  instructions?: string,
+): Promise<void> {
+  await request(
+    `/projects/${projectId}/conversations/${conversationId}/compact`,
+    {
+      method: "POST",
+      body: JSON.stringify(
+        instructions?.trim() ? { instructions: instructions.trim() } : {},
+      ),
+    },
+  );
+}
+
+export async function getConversationContextUsage(
+  projectId: string,
+  conversationId: string,
+): Promise<AgentContextUsage | undefined> {
+  const result = await request<{ contextUsage?: AgentContextUsage }>(
+    `/projects/${projectId}/conversations/${conversationId}/context-usage`,
+  );
+  return result.contextUsage;
+}
+
+export async function getConversationCapabilities(
+  projectId: string,
+  conversationId: string,
+): Promise<ConversationCapabilities> {
+  return request(
+    `/projects/${projectId}/conversations/${conversationId}/capabilities`,
+  );
+}
+
+export async function approvePlan(
+  projectId: string,
+  conversationId: string,
+): Promise<PromptResponse> {
+  return request(
+    `/projects/${projectId}/conversations/${conversationId}/plan/approve`,
+    { method: "POST" },
+  );
+}
+
+export async function cancelPlan(
+  projectId: string,
+  conversationId: string,
+): Promise<void> {
+  await request(`/projects/${projectId}/conversations/${conversationId}/plan`, {
+    method: "DELETE",
+  });
+}
+
+export async function refinePlan(
+  projectId: string,
+  conversationId: string,
+): Promise<void> {
+  await request(
+    `/projects/${projectId}/conversations/${conversationId}/plan/refine`,
+    { method: "POST" },
+  );
+}
+
+export async function answerQuestionnaire(
+  projectId: string,
+  conversationId: string,
+  response: AnswerQuestionnaireRequest,
+): Promise<void> {
+  await request(
+    `/projects/${projectId}/conversations/${conversationId}/questionnaire`,
+    {
+      method: "POST",
+      body: JSON.stringify(response),
+    },
+  );
+}
+
+export async function reviseLastPrompt(
+  projectId: string,
+  conversationId: string,
+  prompt: string,
+): Promise<PromptResponse> {
+  return request(
+    `/projects/${projectId}/conversations/${conversationId}/revise-last`,
+    {
+      method: "POST",
+      body: JSON.stringify({ prompt }),
+    },
+  );
+}
+
+export async function removePendingPrompt(
+  projectId: string,
+  conversationId: string,
+  turnId: string,
+): Promise<void> {
+  await request(
+    `/projects/${projectId}/conversations/${conversationId}/queue/${turnId}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function steerPendingPrompt(
+  projectId: string,
+  conversationId: string,
+  turnId: string,
+): Promise<void> {
+  await request(
+    `/projects/${projectId}/conversations/${conversationId}/queue/${turnId}/steer`,
+    { method: "POST" },
+  );
+}
+
+export async function cancelPrompt(
+  projectId: string,
+  conversationId: string,
+  turnId: string,
+): Promise<void> {
+  await request(
+    `/projects/${projectId}/conversations/${conversationId}/turns/${turnId}/cancel`,
+    { method: "POST" },
+  );
+}
+
+export function subscribeToProject(
+  projectId: string,
+  cursor: number,
+  handlers: {
+    onEvent: (event: RuntimeEvent) => void;
+    onOpen: () => void;
+    onError: () => void;
+    onReset?: () => Promise<number>;
+  },
+): () => void {
+  const controller = new AbortController();
+  void streamProjectEvents(projectId, cursor, controller.signal, handlers);
+  return () => controller.abort();
+}
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
+}
+
+export async function request<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const response = await fetch(apiUrl(path), {
+    ...init,
+    headers: {
+      ...(init.body ? { "content-type": "application/json" } : {}),
+      ...runtimeHeaders(),
+      ...init.headers,
+    },
+  });
+  if (!response.ok) throw await responseError(response);
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
+}
+
+async function responseError(response: Response): Promise<ApiError> {
+  const body = (await response.json().catch(() => ({}))) as {
+    error?: string;
+    message?: string;
+    code?: string;
+  };
+  return new ApiError(
+    body.message ?? body.error ?? `Request failed with ${response.status}`,
+    response.status,
+    body.code,
+  );
+}
+
+async function streamProjectEvents(
+  projectId: string,
+  initialCursor: number,
+  signal: AbortSignal,
+  handlers: {
+    onEvent: (event: RuntimeEvent) => void;
+    onOpen: () => void;
+    onError: () => void;
+    onReset?: () => Promise<number>;
+  },
+): Promise<void> {
+  let cursor = initialCursor;
+  let generation = runtimeConnection().generation;
+  while (!signal.aborted) {
+    const connection = new AbortController();
+    const unsubscribe = subscribeRuntimeConnection(() => connection.abort());
+    const connectionSignal = AbortSignal.any([signal, connection.signal]);
+    try {
+      const current = runtimeConnection();
+      if (current.status !== "ready")
+        throw new Error("Background service unavailable");
+      if (current.generation !== generation) {
+        generation = current.generation;
+        cursor = handlers.onReset ? await handlers.onReset() : 0;
+      }
+      const response = await fetch(
+        apiUrl(`/projects/${projectId}/events?cursor=${cursor}`),
+        {
+          headers: { accept: "text/event-stream", ...runtimeHeaders() },
+          signal: connectionSignal,
+        },
+      );
+      if (response.status === 409 && handlers.onReset) {
+        cursor = await handlers.onReset();
+        continue;
+      }
+      if (!response.ok || !response.body) {
+        throw new ApiError(
+          `Event stream failed with ${response.status}`,
+          response.status,
+        );
+      }
+      handlers.onOpen();
+      await consumeEventStream(
+        response.body,
+        (event) => {
+          if (event.id <= cursor) return;
+          cursor = Math.max(cursor, event.id);
+          handlers.onEvent(event);
+        },
+        connectionSignal,
+      );
+      if (!signal.aborted) handlers.onError();
+    } catch {
+      if (signal.aborted) return;
+      handlers.onError();
+    } finally {
+      unsubscribe();
+    }
+    await reconnectDelay(signal);
+  }
+}
+
+async function streamModelAuthEvents(
+  operationId: string,
+  signal: AbortSignal,
+  handlers: { onEvent: (event: ModelAuthEvent) => void; onError: () => void },
+): Promise<void> {
+  let cursor = 0;
+  while (!signal.aborted) {
+    try {
+      const response = await fetch(
+        apiUrl(
+          `/settings/model-auth/${encodeURIComponent(operationId)}/events?cursor=${cursor}`,
+        ),
+        {
+          headers: { accept: "text/event-stream", ...runtimeHeaders() },
+          signal,
+        },
+      );
+      if (!response.ok || !response.body)
+        throw new ApiError(
+          `Authentication stream failed with ${response.status}`,
+          response.status,
+        );
+      const finished = await consumeModelAuthStream(
+        response.body,
+        (event) => {
+          if (event.id <= cursor) return;
+          cursor = Math.max(cursor, event.id);
+          handlers.onEvent(event);
+        },
+        signal,
+      );
+      if (finished || signal.aborted) return;
+    } catch {
+      if (signal.aborted) return;
+      handlers.onError();
+    }
+    await reconnectDelay(signal);
+  }
+}
+
+async function consumeModelAuthStream(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (event: ModelAuthEvent) => void,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finished = false;
+  try {
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split(/\r?\n\r?\n/);
+      buffer = blocks.pop() ?? "";
+      for (const block of blocks) {
+        const event = parseModelAuthEvent(block);
+        if (!event) continue;
+        onEvent(event);
+        if (
+          event.type === "completed" ||
+          event.type === "cancelled" ||
+          event.type === "error"
+        )
+          finished = true;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return finished;
+}
+
+async function consumeEventStream(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (event: RuntimeEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split(/\r?\n\r?\n/);
+      buffer = blocks.pop() ?? "";
+      for (const block of blocks) {
+        const event = parseRuntimeEvent(block);
+        if (!event) continue;
+        onEvent(event);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function parseRuntimeEvent(block: string): RuntimeEvent | undefined {
+  const fields = new Map<string, string[]>();
+  for (const line of block.split(/\r?\n/)) {
+    if (!line || line.startsWith(":")) continue;
+    const separator = line.indexOf(":");
+    const key = separator < 0 ? line : line.slice(0, separator);
+    const value = separator < 0 ? "" : line.slice(separator + 1).trimStart();
+    fields.set(key, [...(fields.get(key) ?? []), value]);
+  }
+  const type = fields.get("event")?.[0];
+  const data = fields.get("data")?.join("\n");
+  if (
+    !type ||
+    !data ||
+    !RUNTIME_EVENT_TYPES.includes(type as (typeof RUNTIME_EVENT_TYPES)[number])
+  ) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(data) as RuntimeEvent;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseModelAuthEvent(block: string): ModelAuthEvent | undefined {
+  const data = block
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n");
+  if (!data) return undefined;
+  try {
+    return JSON.parse(data) as ModelAuthEvent;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The page Scenes run in. The desktop app loads its own pages from file://,
+ * where Chromium will not let the sandboxed frame load its script, so there
+ * the daemon serves it.
+ */
+export function playableSandboxUrl(): string {
+  const runtime = desktopRuntime();
+  return runtime
+    ? `${runtime.daemonUrl}/playable-sandbox/playable-sandbox.html`
+    : "./playable-sandbox.html";
+}
+
+function apiUrl(path: string): string {
+  const runtime = desktopRuntime();
+  return runtime ? `${runtime.daemonUrl}${path}` : `${API_BASE}${path}`;
+}
+
+function runtimeHeaders(): HeadersInit {
+  const runtime = desktopRuntime();
+  return runtime ? { authorization: `Bearer ${runtime.token}` } : {};
+}
+
+function modelRef(model: AgentModelRef): AgentModelRef {
+  return { provider: model.provider, id: model.id };
+}
+
+function desktopRuntime(): DesktopRuntime | undefined {
+  const desktop = window.putengGameDesktop;
+  if (!desktop) return;
+  const state = runtimeConnection();
+  if (state.status !== "ready")
+    throw new Error(
+      "The background service is unavailable. Wait for recovery or restart it.",
+    );
+  return state.runtime
+    ? { daemonUrl: state.runtime.url, token: state.runtime.token }
+    : desktop.runtime;
+}
+
+function reconnectDelay(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, 500);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+export async function createMcpPlugin(
+  input: import("../shared/plugins.js").CreateMcpPluginRequest,
+): Promise<PluginDetail> {
+  return request("/plugins/mcp", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+export async function readPluginConfiguration(
+  id: string,
+): Promise<import("../shared/plugins.js").PluginConfigurationView> {
+  return request(`/plugins/${encodeURIComponent(id)}/configuration`);
+}
+export async function savePluginConfiguration(
+  id: string,
+  values: import("../shared/plugins.js").PluginConfigurationValues,
+): Promise<import("../shared/plugins.js").PluginConfigurationView> {
+  return request(`/plugins/${encodeURIComponent(id)}/configuration`, {
+    method: "PUT",
+    body: JSON.stringify({ values }),
+  });
+}
+export async function testPluginMcp(
+  id: string,
+  server: string,
+  action: "test" | "auth-start" | "auth-complete" = "test",
+  input?: string,
+): Promise<import("../shared/plugins.js").PluginMcpResult> {
+  return request(
+    `/plugins/${encodeURIComponent(id)}/mcp/${encodeURIComponent(server)}/${action}`,
+    { method: "POST", body: JSON.stringify(input ? { input } : {}) },
+  );
+}
+export async function createPluginSetup(
+  pluginId?: string,
+): Promise<import("../shared/plugin-setup.js").PluginSetupState> {
+  return request("/plugins/setup-sessions", {
+    method: "POST",
+    body: JSON.stringify({ pluginId }),
+  });
+}
+export async function readPluginSetup(
+  id: string,
+): Promise<import("../shared/plugin-setup.js").PluginSetupState> {
+  return request(`/plugins/setup-sessions/${encodeURIComponent(id)}`);
+}
+export async function deletePluginSetup(id: string): Promise<void> {
+  await request(`/plugins/setup-sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+export async function promptPluginSetup(
+  id: string,
+  prompt: string,
+  model: AgentModelRef,
+  reasoningLevel?: import("../shared/contracts.js").AgentReasoningLevel,
+): Promise<import("../shared/plugin-setup.js").PluginSetupState> {
+  return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/prompt`, {
+    method: "POST",
+    body: JSON.stringify({ prompt, model, reasoningLevel }),
+  });
+}
+export async function abortPluginSetup(id: string): Promise<void> {
+  await request(`/plugins/setup-sessions/${encodeURIComponent(id)}/abort`, {
+    method: "POST",
+  });
+}
+
+export async function listPluginSetups(): Promise<
+  import("../shared/plugin-setup.js").PluginSetupSummary[]
+> {
+  return request("/plugins/setup-sessions");
+}
+export async function readPluginDraft(
+  id: string,
+): Promise<import("../shared/plugin-setup.js").PluginDraft> {
+  return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/draft`);
+}
+export async function readPluginDraftFile(
+  id: string,
+  path: string,
+): Promise<{ path: string; content: string }> {
+  return request(
+    `/plugins/setup-sessions/${encodeURIComponent(id)}/file?${new URLSearchParams({ path })}`,
+  );
+}
+export async function installPluginDraft(
+  id: string,
+  revision: string,
+): Promise<import("../shared/plugin-setup.js").PluginSetupState> {
+  return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/install`, {
+    method: "POST",
+    body: JSON.stringify({ revision }),
+  });
+}
+export async function readPluginDraftConfiguration(
+  id: string,
+): Promise<import("../shared/plugins.js").PluginConfigurationView> {
+  return request(
+    `/plugins/setup-sessions/${encodeURIComponent(id)}/configuration`,
+  );
+}
+export async function savePluginDraftConfiguration(
+  id: string,
+  values: import("../shared/plugins.js").PluginConfigurationValues,
+): Promise<import("../shared/plugins.js").PluginConfigurationView> {
+  return request(
+    `/plugins/setup-sessions/${encodeURIComponent(id)}/configuration`,
+    { method: "PUT", body: JSON.stringify({ values }) },
+  );
+}
+export async function testPluginDraft(
+  id: string,
+  server: string,
+  revision: string,
+): Promise<import("../shared/plugins.js").PluginMcpResult> {
+  return request(
+    `/plugins/setup-sessions/${encodeURIComponent(id)}/test/${encodeURIComponent(server)}`,
+    { method: "POST", body: JSON.stringify({ revision }) },
+  );
+}
+export async function readPluginMcpDefinition(
+  id: string,
+  server: string,
+): Promise<{ definition: import("../shared/plugins.js").McpServerDefinition }> {
+  return request(
+    `/plugins/${encodeURIComponent(id)}/mcp/${encodeURIComponent(server)}/definition`,
+  );
+}
+export async function savePluginMcpDefinition(
+  id: string,
+  server: string,
+  definition: import("../shared/plugins.js").McpServerDefinition,
+): Promise<PluginDetail> {
+  return request(
+    `/plugins/${encodeURIComponent(id)}/mcp/${encodeURIComponent(server)}/definition`,
+    { method: "PUT", body: JSON.stringify({ definition }) },
+  );
+}
+
+export async function stopPreview(
+  projectId: string,
+): Promise<{ preview: ProjectState["preview"] }> {
+  return request(`/projects/${projectId}/preview`, { method: "DELETE" });
+}
+export async function acquirePreview(
+  projectId: string,
+  leaseId: string,
+  automatic = false,
+  paused = false,
+): Promise<void> {
+  await request(`/projects/${projectId}/preview/leases/${leaseId}`, {
+    method: "PUT",
+    body: JSON.stringify({ automatic, paused }),
+  });
+}
+export async function releasePreview(
+  projectId: string,
+  leaseId: string,
+): Promise<void> {
+  await request(`/projects/${projectId}/preview/leases/${leaseId}`, {
+    method: "DELETE",
+  });
+}
+export async function inspectProjectPreview(
+  projectId: string,
+  settings: ProjectRunSettings,
+): Promise<{
+  mode?: string;
+  manager?: string;
+  source?: string;
+  error?: string;
+}> {
+  return request(`/projects/${projectId}/preview/inspect`, {
+    method: "POST",
+    body: JSON.stringify(settings),
+  });
+}

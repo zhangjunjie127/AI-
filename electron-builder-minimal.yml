@@ -1,0 +1,18 @@
+appId: ai.putenggame.desktop
+productName: PutengGame
+asar: false
+npmRebuild: false
+afterPack: scripts/noop-after-pack.mjs
+directories:
+  output: release-minimal
+files:
+  - dist/desktop/**/*
+  - dist/daemon/**/*
+  - dist/shared/**/*
+  - dist/renderer/**/*
+  - dist/player/**/*
+win:
+  target:
+    - nsis
+nsis:
+  deleteAppDataOnUninstall: false

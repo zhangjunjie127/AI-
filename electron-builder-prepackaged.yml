@@ -1,0 +1,12 @@
+appId: ai.putenggame.desktop
+productName: PutengGame
+directories:
+  output: release-installer
+win:
+  target:
+    - nsis
+  signAndEditExecutable: false
+nsis:
+  deleteAppDataOnUninstall: false
+  oneClick: true
+publish: never
