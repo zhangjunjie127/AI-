@@ -429,6 +429,189 @@ describe("pick protocol messages", () => {
 });
 
 describe("DocumentPlayableSurfaceHost click selection", () => {
+  it("picks a small text item beneath a non-selectable overlapping container", async () => {
+    const window = new Window();
+    Object.defineProperty(window, "top", { value: {} });
+    Object.defineProperty(window, "origin", { value: "null" });
+    Object.assign(globalThis, {
+      MutationObserver: window.MutationObserver,
+      HTMLElement: window.HTMLElement,
+      Element: window.Element,
+      ShadowRoot: window.ShadowRoot,
+      Event: window.Event,
+      getComputedStyle: window.getComputedStyle.bind(window),
+    });
+    const document = window.document as unknown as Document;
+    const host = new DocumentPlayableSurfaceHost(document, async () => ({
+      mount: async () => undefined,
+    }));
+    await host.mountNode(
+      {
+        id: "ending",
+        html: [
+          '<main data-putenggame-source="nodes/ending/index.html:1:1">',
+          '<p data-putenggame-source="nodes/ending/index.html:2:1">结局</p>',
+          '<div data-putenggame-source="nodes/ending/index.html:3:1" class="sealed">',
+          '<h1 data-putenggame-source="nodes/ending/index.html:4:1">Ending</h1>',
+          "</div></main>",
+        ].join(""),
+        css: "",
+        javascript: "",
+        inputs: [],
+      },
+      {} as never,
+    );
+    const root = document.querySelector<HTMLElement>(
+      '[data-playable-sandbox="true"]',
+    )!;
+    const surface = document.querySelector<HTMLElement>(
+      '[data-playable-surface="ending"]',
+    )!;
+    const overlay = surface.shadowRoot!.querySelector<HTMLElement>(".sealed")!;
+    const caption = surface.shadowRoot!.querySelector<HTMLElement>("p")!;
+    Object.defineProperty(root, "getBoundingClientRect", {
+      value: () => ({ x: 0, y: 0, width: 640, height: 360 }),
+    });
+    Object.defineProperty(surface, "getBoundingClientRect", {
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        width: 640,
+        height: 360,
+      }),
+    });
+    Object.defineProperty(caption, "getBoundingClientRect", {
+      value: () => ({
+        x: 20,
+        y: 20,
+        left: 20,
+        top: 20,
+        right: 70,
+        bottom: 36,
+        width: 50,
+        height: 16,
+      }),
+    });
+    Object.defineProperty(overlay, "getBoundingClientRect", {
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 120,
+        bottom: 120,
+        width: 120,
+        height: 120,
+      }),
+    });
+    Object.defineProperty(
+      surface.shadowRoot!.querySelector<HTMLElement>("h1")!,
+      "getBoundingClientRect",
+      {
+        value: () => ({
+          x: 80,
+          y: 80,
+          left: 80,
+          top: 80,
+          right: 110,
+          bottom: 100,
+          width: 30,
+          height: 20,
+        }),
+      },
+    );
+
+    const onPick = vi.fn();
+    host.startPicking("select", {
+      onPick,
+      onTextSelect: () => undefined,
+      onInteractionSelect: () => undefined,
+      onTextEdit: () => undefined,
+      onTextCreate: () => undefined,
+      onMove: () => undefined,
+      onTransform: () => undefined,
+      onDelete: () => undefined,
+      onPasteElements: async () => undefined,
+      onCancel: () => undefined,
+    });
+    const down = new Event("pointerdown", { bubbles: true, composed: true });
+    Object.assign(down, {
+      button: 0,
+      pointerId: 1,
+      clientX: 30,
+      clientY: 26,
+      shiftKey: false,
+      metaKey: false,
+      ctrlKey: false,
+    });
+    overlay.dispatchEvent(down);
+    const up = new Event("pointerup", { bubbles: true, composed: true });
+    Object.assign(up, { button: 0, pointerId: 1, clientX: 30, clientY: 26 });
+    root.dispatchEvent(up);
+    const click = new Event("click", { bubbles: true, composed: true });
+    Object.assign(click, { clientX: 30, clientY: 26 });
+    root.dispatchEvent(click);
+
+    expect(onPick).toHaveBeenCalledOnce();
+    expect(onPick.mock.calls[0]![0]).toMatchObject({
+      tag: "p",
+      text: "结局",
+      source: "nodes/ending/index.html:2:1",
+    });
+    expect(
+      root.querySelector<HTMLElement>('[data-playable-pick-outline="true"]')
+        ?.style.top,
+    ).toBe("20px");
+
+    host.stopPicking();
+    const onMove = vi.fn();
+    host.startPicking("move", {
+      onPick: () => undefined,
+      onTextSelect: () => undefined,
+      onInteractionSelect: () => undefined,
+      onTextEdit: () => undefined,
+      onTextCreate: () => undefined,
+      onMove,
+      onTransform: () => undefined,
+      onDelete: () => undefined,
+      onPasteElements: async () => undefined,
+      onCancel: () => undefined,
+    });
+    const moveDown = new Event("pointerdown", {
+      bubbles: true,
+      composed: true,
+    });
+    Object.assign(moveDown, {
+      button: 0,
+      pointerId: 2,
+      clientX: 30,
+      clientY: 26,
+    });
+    overlay.dispatchEvent(moveDown);
+    const move = new Event("pointermove", { bubbles: true, composed: true });
+    Object.assign(move, { pointerId: 2, clientX: 45, clientY: 36 });
+    root.dispatchEvent(move);
+    const moveUp = new Event("pointerup", { bubbles: true, composed: true });
+    Object.assign(moveUp, {
+      button: 0,
+      pointerId: 2,
+      clientX: 45,
+      clientY: 36,
+    });
+    root.dispatchEvent(moveUp);
+
+    expect(onMove).toHaveBeenCalledOnce();
+    expect(onMove.mock.calls[0]![0].pick).toMatchObject({
+      tag: "p",
+      text: "结局",
+      source: "nodes/ending/index.html:2:1",
+    });
+    host.destroy();
+    window.close();
+  });
+
   it("adds new text on a double-clicked blank area and keeps it source-editable", async () => {
     const window = new Window();
     Object.defineProperty(window, "top", { value: {} });

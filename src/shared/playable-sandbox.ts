@@ -205,10 +205,10 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
     const idleCursor =
       tool === "text" ? "text" : tool === "move" ? "grab" : "crosshair";
     this.#projectRoot.style.cursor = idleCursor;
-    const movableElements =
-      tool === "move"
-        ? new Set(selectableSourceTargets(this.#projectRoot))
-        : undefined;
+    const selectableElements = new Set(
+      selectableSourceTargets(this.#projectRoot),
+    );
+    const movableElements = tool === "move" ? selectableElements : undefined;
     let editing: TextEditing | undefined;
     let dragging: Dragging | undefined;
     let selected: SelectedElement | undefined;
@@ -332,7 +332,12 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       if (tool === "move")
         return place(
           movableElements
-            ? movableTarget(event.composedPath(), movableElements)?.pick.box
+            ? movableTarget(
+                event.composedPath(),
+                movableElements,
+                (event as PointerEvent).clientX,
+                (event as PointerEvent).clientY,
+              )?.pick.box
             : undefined,
         );
       const pick = describePlayablePick(event.composedPath());
@@ -483,7 +488,12 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       }
       if (tool !== "move" || dragging || pointer.button !== 0) return;
       const target = movableElements
-        ? movableTarget(event.composedPath(), movableElements)
+        ? movableTarget(
+            event.composedPath(),
+            movableElements,
+            pointer.clientX,
+            pointer.clientY,
+          )
         : undefined;
       const root = target?.element.getRootNode();
       const size =
@@ -892,12 +902,26 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       if (!pick) return;
       if (tool === "select") {
         const mouse = event as MouseEvent;
-        const appearance = path
-          ? describePlayableAppearanceTarget(path)
+        const pointTarget = path
+          ? selectableElementAtPoint(
+              path,
+              selectableElements,
+              mouse.clientX,
+              mouse.clientY,
+            )
           : undefined;
-        const sourceTarget = path
-          ? describePlayableSourceTarget(path)
-          : undefined;
+        const appearance = pointTarget
+          ? describePlayableAppearanceTarget(elementPath(pointTarget))
+          : path
+            ? describePlayableAppearanceTarget(path)
+            : undefined;
+        const pointPick = pointTarget ? pickForElement(pointTarget) : undefined;
+        const sourceTarget =
+          pointTarget && pointPick
+            ? { element: pointTarget, pick: pointPick }
+            : path
+              ? describePlayableSourceTarget(path)
+              : undefined;
         const selectedPick = sourceTarget?.pick ?? pick;
         if (selectedPick.mediaSlot === "backdrop") return;
         const additive = mouse.shiftKey || mouse.metaKey || mouse.ctrlKey;
@@ -1735,15 +1759,40 @@ const MOVE_THRESHOLD = 3;
 function movableTarget(
   path: readonly EventTarget[],
   selectable: ReadonlySet<HTMLElement>,
+  x: number,
+  y: number,
 ): { element: HTMLElement; pick: PlayablePickResult } | undefined {
-  const element = path.find(
-    (target): target is HTMLElement =>
-      target instanceof HTMLElement && selectable.has(target),
-  );
+  const element = selectableElementAtPoint(path, selectable, x, y);
   if (!element) return undefined;
   const pick = pickForElement(element);
   if (!pick || pick.mediaSlot === "backdrop") return undefined;
   return { element, pick };
+}
+
+function selectableElementAtPoint(
+  path: readonly EventTarget[],
+  selectable: ReadonlySet<HTMLElement>,
+  x: number,
+  y: number,
+): HTMLElement | undefined {
+  const direct = path.find(
+    (target): target is HTMLElement =>
+      target instanceof HTMLElement && selectable.has(target),
+  );
+  if (direct) return direct;
+
+  return [...selectable]
+    .filter((element) => {
+      const box = element.getBoundingClientRect();
+      return x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
+    })
+    .sort((first, second) => {
+      const firstBox = first.getBoundingClientRect();
+      const secondBox = second.getBoundingClientRect();
+      return (
+        firstBox.width * firstBox.height - secondBox.width * secondBox.height
+      );
+    })[0];
 }
 
 /**
