@@ -276,6 +276,22 @@ describe("pick protocol messages", () => {
       }),
     ).toBe(true);
     expect(
+      isPlayableHostMessage({
+        kind: "putenggame:playable:element-clipboard",
+        instanceId: "a",
+        action: "paste",
+        sequence: 1,
+      }),
+    ).toBe(true);
+    expect(
+      isPlayableHostMessage({
+        kind: "putenggame:playable:element-clipboard",
+        instanceId: "a",
+        action: "paste",
+        sequence: 1.5,
+      }),
+    ).toBe(false);
+    expect(
       isPlayableFrameMessage({
         kind: "putenggame:playable:picked",
         instanceId: "a",
@@ -867,9 +883,7 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
     const copy = new Event("keydown", { bubbles: true, composed: true });
     Object.assign(copy, { key: "c", ctrlKey: true, metaKey: false });
     button.dispatchEvent(copy);
-    const paste = new Event("keydown", { bubbles: true, composed: true });
-    Object.assign(paste, { key: "v", ctrlKey: true, metaKey: false });
-    button.dispatchEvent(paste);
+    await host.pastePickedElements();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const buttons = surface.shadowRoot!.querySelectorAll("button");

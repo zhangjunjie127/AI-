@@ -38,6 +38,7 @@ import type {
   PlayableAppearanceTimingCommand,
   NodePlayerDefinition,
   PlayableDeleteEdit,
+  PlayableElementClipboardCommand,
   PlayableElementCopy,
   PlayableInteractionSelection,
   PlayableInteractionTimingEdit,
@@ -181,6 +182,8 @@ export function PlayableNodeWorkbench({
   onWriteText,
   onWriteTextCreate,
   onWriteElementCopies,
+  elementClipboardCommand,
+  onElementClipboardCommandApplied,
   onWriteTextStyle,
   onWriteInteractionTimings,
   onWriteMove,
@@ -216,6 +219,8 @@ export function PlayableNodeWorkbench({
   onWriteElementCopies: (
     copies: PlayableElementCopy[],
   ) => Promise<Record<string, string> | undefined>;
+  elementClipboardCommand?: PlayableElementClipboardCommand;
+  onElementClipboardCommandApplied?: (sequence: number) => void;
   /** Writes a font property back to the selected text element. */
   onWriteTextStyle: (edit: PlayableTextStyleEdit) => Promise<boolean>;
   /** Writes a non-video element's appearance delay back to its source element. */
@@ -1042,6 +1047,10 @@ export function PlayableNodeWorkbench({
           onTransform={onTransform}
           onDelete={onDelete}
           onPasteElements={onPasteElements}
+          elementClipboardCommand={elementClipboardCommand}
+          onElementClipboardCommandApplied={
+            onElementClipboardCommandApplied
+          }
           onMediaState={setMediaState}
           mediaCommand={mediaCommand}
           onPickCancel={onPickCancel}

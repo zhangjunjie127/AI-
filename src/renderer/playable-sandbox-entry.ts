@@ -49,6 +49,12 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
     else pending.resolve(event.data.sources);
     return;
   }
+  if (event.data.kind === "putenggame:playable:element-clipboard") {
+    if (session?.instanceId !== event.data.instanceId) return;
+    if (event.data.action === "copy") session.host.copyPickedElements();
+    else void session.host.pastePickedElements()?.catch(() => {});
+    return;
+  }
   if (event.data.kind === "putenggame:playable:media-command") {
     if (session?.instanceId === event.data.instanceId)
       session.host.controlMedia(event.data.command);

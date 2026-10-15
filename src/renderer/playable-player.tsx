@@ -10,6 +10,7 @@ import type {
   PlayableAssetTransfer,
   PlayableAppearanceTimingCommand,
   PlayableDeleteEdit,
+  PlayableElementClipboardCommand,
   PlayableElementCopy,
   PlayableFrameMessage,
   PlayableMediaCommand,
@@ -65,6 +66,8 @@ export interface NodePlayerProps {
   onPasteElements?: (
     copies: PlayableElementCopy[],
   ) => Promise<Record<string, string> | undefined>;
+  elementClipboardCommand?: PlayableElementClipboardCommand;
+  onElementClipboardCommandApplied?: (sequence: number) => void;
   onMediaState?: (state: PlayableMediaState) => void;
   /** Keeps the authoring preview's media position across source updates. */
   preserveMediaState?: PlayableMediaState;
@@ -101,6 +104,8 @@ export function NodePlayer({
   onTransform,
   onDelete,
   onPasteElements,
+  elementClipboardCommand,
+  onElementClipboardCommandApplied,
   onMediaState,
   preserveMediaState,
   backdropEffects,
@@ -254,6 +259,24 @@ export function NodePlayer({
       "*",
     );
   }, [instanceId, activeTool, ready]);
+
+  useEffect(() => {
+    if (!ready || !elementClipboardCommand) return;
+    iframe.current?.contentWindow?.postMessage(
+      {
+        kind: "putenggame:playable:element-clipboard",
+        instanceId,
+        ...elementClipboardCommand,
+      },
+      "*",
+    );
+    onElementClipboardCommandApplied?.(elementClipboardCommand.sequence);
+  }, [
+    elementClipboardCommand,
+    instanceId,
+    onElementClipboardCommandApplied,
+    ready,
+  ]);
 
   const mediaCommandKey = JSON.stringify(mediaCommand ?? null);
   useEffect(() => {

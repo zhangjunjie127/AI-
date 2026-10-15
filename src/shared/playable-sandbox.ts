@@ -60,6 +60,8 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
   #picking?: {
     stop: () => void;
     delete: (pick: PlayablePickResult) => void;
+    copy: () => void;
+    paste: () => Promise<void>;
   };
   #mediaListener?: (state: PlayableMediaState) => void;
   #mediaBindings = new WeakSet<HTMLVideoElement>();
@@ -1021,6 +1023,8 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       view.addEventListener(type, listener, { capture: true });
     this.#projectRoot.addEventListener("pointerleave", leavePreview);
     this.#picking = {
+      copy: copySelected,
+      paste: pasteCopied,
       delete: (pick) => {
         const key = selectionKey(pick);
         const current = selectedElements.find(
@@ -1058,6 +1062,14 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
 
   deletePicked(pick: PlayablePickResult): void {
     this.#picking?.delete(pick);
+  }
+
+  copyPickedElements(): void {
+    this.#picking?.copy();
+  }
+
+  pastePickedElements(): Promise<void> | undefined {
+    return this.#picking?.paste();
   }
 
   setTextSource(id: string, source: string | undefined): void {

@@ -151,6 +151,11 @@ export interface PlayableElementCopy {
   ids: string[];
 }
 
+export interface PlayableElementClipboardCommand {
+  action: "copy" | "paste";
+  sequence: number;
+}
+
 export interface PlayableAssetTransfer {
   contentType: string;
   bytes: ArrayBuffer;
@@ -205,6 +210,12 @@ export type PlayableHostMessage =
       requestId: string;
       sources?: Record<string, string>;
       error?: string;
+    }
+  | {
+      kind: "putenggame:playable:element-clipboard";
+      instanceId: string;
+      action: "copy" | "paste";
+      sequence: number;
     }
   | {
       kind: "putenggame:playable:media-command";
@@ -339,6 +350,13 @@ export function isPlayableHostMessage(
             ([id, source]) =>
               /^putenggame-copy-[\w-]+$/.test(id) && typeof source === "string",
           )))
+    );
+  if (value.kind === "putenggame:playable:element-clipboard")
+    return (
+      (value.action === "copy" || value.action === "paste") &&
+      typeof value.sequence === "number" &&
+      Number.isSafeInteger(value.sequence) &&
+      value.sequence > 0
     );
   if (value.kind === "putenggame:playable:appearance-timing") {
     const command = value.command;

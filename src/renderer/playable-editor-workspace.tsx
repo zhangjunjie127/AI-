@@ -64,6 +64,7 @@ import {
 import type {
   NodePlayerDefinition,
   PlayableDeleteEdit,
+  PlayableElementClipboardCommand,
   PlayableElementCopy,
   PlayableInteractionTimingEdit,
   PlayableMove,
@@ -145,6 +146,7 @@ import {
   PLAYABLE_NODE_TYPES,
   PlayableCanvasContext,
 } from "./playable-node-card.js";
+import { routePlayableClipboardShortcut } from "./playable-editor-shortcuts.js";
 import {
   PlayableAddControl,
   PlayableCanvasContextMenu,
@@ -258,6 +260,9 @@ export function PlayableEditorWorkspace({
   );
   const [selectedEdgeId, setSelectedEdgeId] = useState<string>();
   const [openedNodeId, setOpenedNodeId] = useState<string>();
+  const [elementClipboardCommand, setElementClipboardCommand] =
+    useState<PlayableElementClipboardCommand>();
+  const elementClipboardSequence = useRef(0);
   const [canvasContextMenu, setCanvasContextMenu] =
     useState<CanvasContextMenuState>();
   const [copiedSelection, setCopiedSelection] =
@@ -877,18 +882,29 @@ export function PlayableEditorWorkspace({
         !(event.metaKey || event.ctrlKey)
       )
         return;
-      const key = event.key.toLowerCase();
-      if (key === "c") {
-        if (!nodes.some((node) => node.selected)) return;
-        event.preventDefault();
-        void copySelection();
+      if (
+        routePlayableClipboardShortcut(
+          event,
+          Boolean(openedNodeId),
+          (action) =>
+            setElementClipboardCommand({
+              action,
+              sequence: ++elementClipboardSequence.current,
+            }),
+          (action) => {
+            if (action === "copy") {
+              if (!nodes.some((node) => node.selected)) return false;
+              event.preventDefault();
+              void copySelection();
+              return true;
+            }
+            event.preventDefault();
+            void pasteSelectionAt(pastePosition());
+            return true;
+          },
+        )
+      )
         return;
-      }
-      if (key === "v") {
-        event.preventDefault();
-        void pasteSelectionAt(pastePosition());
-        return;
-      }
       const step = undoShortcut(event);
       if (!step) return;
       event.preventDefault();
@@ -898,7 +914,14 @@ export function PlayableEditorWorkspace({
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [codebase, copiedSelection, nodes, workspaceView, projectSettingsOpen]);
+  }, [
+    codebase,
+    copiedSelection,
+    nodes,
+    workspaceView,
+    projectSettingsOpen,
+    openedNodeId,
+  ]);
 
   // A navigation Exit has no line for the canvas to delete, so a connection
   // selected from its Exit row is deleted here, as a drawn one is.
@@ -2335,6 +2358,12 @@ export function PlayableEditorWorkspace({
           onWriteText={writeText}
           onWriteTextCreate={writeTextCreate}
           onWriteElementCopies={writeElementCopies}
+          elementClipboardCommand={elementClipboardCommand}
+          onElementClipboardCommandApplied={(sequence) =>
+            setElementClipboardCommand((current) =>
+              current?.sequence === sequence ? undefined : current,
+            )
+          }
           onWriteTextStyle={writeTextStyle}
           onWriteInteractionTimings={writeInteractionTimings}
           onWriteMove={writeMove}
