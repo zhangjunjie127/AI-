@@ -299,13 +299,24 @@ describe("parsePlayableTranslate", () => {
       x: 10,
       y: 10,
     });
+    expect(
+      parsePlayableTranslate("calc(2cqw + 14.4px) calc(2cqh + 25.6px)", size),
+    ).toEqual({ x: 3.44, y: 7.12 });
+    const calcWithNegativeOffsets = parsePlayableTranslate(
+      "calc(0cqw - 297.025px) calc(0cqh + 521.888px)",
+      size,
+    );
+    expect(calcWithNegativeOffsets?.x).toBeCloseTo(-29.7025);
+    expect(calcWithNegativeOffsets?.y).toBeCloseTo(104.3776);
   });
 
   it("refuses offsets a move cannot keep", () => {
     expect(parsePlayableTranslate("-50% 0", size)).toBeUndefined();
     expect(parsePlayableTranslate("1cqh 1cqw", size)).toBeUndefined();
     expect(parsePlayableTranslate("1cqw 1cqh 2px", size)).toBeUndefined();
-    expect(parsePlayableTranslate("calc(1cqw + 2px) 0", size)).toBeUndefined();
+    expect(
+      parsePlayableTranslate("calc(1cqw + 2px * 2) 0", size),
+    ).toBeUndefined();
     expect(parsePlayableTranslate("5 0", size)).toBeUndefined();
   });
 });

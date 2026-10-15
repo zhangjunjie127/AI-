@@ -48,7 +48,7 @@ export function parsePlayableTranslate(
 ): PlayableTranslate | undefined {
   const text = value.trim();
   if (!text || text === "none") return { x: 0, y: 0 };
-  const [first, second, ...rest] = text.split(/\s+/);
+  const [first, second, ...rest] = text.match(/calc\([^)]*\)|\S+/gi) ?? [];
   if (rest.length) return undefined;
   const x = readOffset(first!, "cqw", size.width);
   const y = second === undefined ? 0 : readOffset(second, "cqh", size.height);
@@ -85,12 +85,20 @@ function readOffset(
   length: number,
 ): number | undefined {
   const match = /^(-?(?:\d+\.?\d*|\.\d+))(cqw|cqh|px)?$/.exec(token);
-  if (!match) return undefined;
-  const number = Number(match[1]);
-  if (!match[2]) return number === 0 ? 0 : undefined;
-  if (match[2] === unit) return number;
-  if (match[2] === "px" && length > 0) return (number / length) * 100;
-  return undefined;
+  if (match) {
+    const number = Number(match[1]);
+    if (!match[2]) return number === 0 ? 0 : undefined;
+    if (match[2] === unit) return number;
+    if (match[2] === "px" && length > 0) return (number / length) * 100;
+    return undefined;
+  }
+
+  const calc = /^calc\(\s*(-?(?:\d+\.?\d*|\.\d+))(cqw|cqh|px)?\s*([+-])\s*(-?(?:\d+\.?\d*|\.\d+))(cqw|cqh|px)?\s*\)$/i.exec(token);
+  if (!calc) return undefined;
+  const first = readOffset(`${calc[1]}${calc[2] ?? ""}`, unit, length);
+  const second = readOffset(`${calc[4]}${calc[5] ?? ""}`, unit, length);
+  if (first === undefined || second === undefined) return undefined;
+  return first + (calc[3] === "+" ? second : -second);
 }
 
 /**

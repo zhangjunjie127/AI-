@@ -914,10 +914,13 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
     expect(buttons[1]!.getAttribute("data-putenggame-source")).toBe(
       "nodes/choice/index.html:2:1",
     );
+    expect(buttons[1]!.style.translate).not.toContain("calc(");
     expect(
       buttons[1]!.querySelector("span")!.getAttribute("data-putenggame-source"),
     ).toBe("nodes/choice/index.html:3:1");
 
+    buttons[1]!.style.translate =
+      "calc(2cqw + 0px) calc(2cqh + 0px)";
     const onMove = vi.fn();
     host.startPicking("move", {
       onPick: () => undefined,
@@ -947,7 +950,10 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
     root.dispatchEvent(moveUp);
 
     expect(onMove).toHaveBeenCalledOnce();
-    expect(onMove.mock.calls[0]![0]).toMatchObject({ inPlace: true });
+    expect(onMove.mock.calls[0]![0]).toMatchObject({
+      inPlace: true,
+      translate: { x: 5.13, y: 7.56 },
+    });
     expect(buttons[1]!.style.translate).not.toContain("calc(");
 
     host.destroy();
