@@ -34,6 +34,7 @@ export const PLAYABLE_MOTION_ATTRIBUTES = {
   signal: "data-putenggame-motion-signal",
   timeoutSignal: "data-putenggame-motion-timeout",
   asset: "data-putenggame-button-asset",
+  assetScale: "data-putenggame-button-asset-scale",
 } as const;
 
 const MOTION_KINDS = new Set<PlayableMotionKind>([
@@ -76,6 +77,13 @@ export function parsePlayableMotionConfig(
     ...(signal ? { signal } : {}),
     ...(timeoutSignal ? { timeoutSignal } : {}),
   };
+}
+
+export function playableButtonAssetScale(value: string | null): number {
+  const scale = value === null ? 100 : Number(value);
+  return Number.isFinite(scale) && scale >= 50 && scale <= 200
+    ? Math.round(scale)
+    : 100;
 }
 
 export function setPlayableElementAttributes(
@@ -156,25 +164,18 @@ export function insertPlayableMotion(
 export function mountPlayableMotionElement(
   element: HTMLElement,
   context: PlayableNodeContext,
+  assetUrl?: string,
 ): () => void {
   const cleanups: (() => void)[] = [];
   const assetId = element.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.asset);
   if (assetId) {
     try {
-      const previous = element.style.backgroundImage;
-      const previousSize = element.style.backgroundSize;
-      const previousPosition = element.style.backgroundPosition;
-      const previousRepeat = element.style.backgroundRepeat;
-      element.style.backgroundImage = `url("${context.assets.url(assetId)}")`;
-      element.style.backgroundSize = "contain";
-      element.style.backgroundPosition = "center";
-      element.style.backgroundRepeat = "no-repeat";
-      cleanups.push(() => {
-        element.style.backgroundImage = previous;
-        element.style.backgroundSize = previousSize;
-        element.style.backgroundPosition = previousPosition;
-        element.style.backgroundRepeat = previousRepeat;
-      });
+      cleanups.push(
+        mountPlayableButtonAsset(
+          element,
+          assetUrl ?? context.assets.url(assetId),
+        ),
+      );
     } catch {
       // An undeclared button asset should not prevent the scene from mounting.
     }
@@ -182,6 +183,52 @@ export function mountPlayableMotionElement(
   const config = parsePlayableMotionConfig(element);
   if (config) cleanups.push(mountMotion(element, config, context));
   return () => cleanups.forEach((cleanup) => cleanup());
+}
+
+function mountPlayableButtonAsset(
+  element: HTMLElement,
+  assetUrl: string,
+): () => void {
+  const view = element.ownerDocument.defaultView;
+  const previous = {
+    backgroundImage: element.style.backgroundImage,
+    isolation: element.style.isolation,
+    position: element.style.position,
+  };
+  const layer = element.ownerDocument.createElement("span");
+  layer.dataset.putenggameButtonAssetImage = "";
+  Object.assign(layer.style, {
+    position: "absolute",
+    inset: "0",
+    zIndex: "-1",
+    overflow: "hidden",
+    borderRadius: "inherit",
+    pointerEvents: "none",
+  });
+  const image = element.ownerDocument.createElement("img");
+  image.src = assetUrl;
+  image.alt = "";
+  image.draggable = false;
+  Object.assign(image.style, {
+    display: "block",
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
+    transformOrigin: "center",
+    transform: `scale(${playableButtonAssetScale(element.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.assetScale)) / 100})`,
+  });
+  layer.append(image);
+  element.prepend(layer);
+  element.style.backgroundImage = "none";
+  element.style.isolation = "isolate";
+  if (view?.getComputedStyle(element).position === "static")
+    element.style.position = "relative";
+  return () => {
+    layer.remove();
+    element.style.backgroundImage = previous.backgroundImage;
+    element.style.isolation = previous.isolation;
+    element.style.position = previous.position;
+  };
 }
 
 function mountMotion(

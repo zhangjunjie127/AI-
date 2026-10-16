@@ -1441,6 +1441,45 @@ export function PlayableEditorWorkspace({
     return true;
   }
 
+  async function writeButtonAssetScale(
+    pick: PlayablePickResult,
+    scale: number,
+  ): Promise<boolean> {
+    const graph = codebase?.graph;
+    const location = pick.source
+      ? parsePlayableSourceLocation(pick.source)
+      : undefined;
+    const node = graph?.nodes.find((candidate) => candidate.id === pick.nodeId);
+    if (
+      !graph ||
+      !location ||
+      !node ||
+      node.source.html !== location.file ||
+      pick.tag !== "button" ||
+      !pick.buttonAssetId ||
+      !Number.isInteger(scale) ||
+      scale < 50 ||
+      scale > 200
+    )
+      return false;
+    const file = await getWorkspaceFile(projectId, location.file);
+    const before = file.truncated ? undefined : file.content;
+    if (before === undefined) return false;
+    const html = setPlayableElementAttributes(before, location, pick.tag, {
+      [PLAYABLE_MOTION_ATTRIBUTES.assetScale]:
+        scale === 100 ? undefined : String(scale),
+    });
+    if (html === undefined) return false;
+    if (html !== before)
+      await writeSources(
+        graph,
+        { [location.file]: html },
+        { [location.file]: before },
+        "调整按钮背景图大小",
+      );
+    return true;
+  }
+
   async function createMotion(
     config: PlayableMotionConfig,
   ): Promise<{ id: string; source: string } | undefined> {
@@ -1487,6 +1526,7 @@ export function PlayableEditorWorkspace({
     const withAsset = addPlayableNodeAsset(graph, node.id, asset);
     const html = setPlayableElementAttributes(before, location, pick.tag, {
       [PLAYABLE_MOTION_ATTRIBUTES.asset]: withAsset.assetId,
+      [PLAYABLE_MOTION_ATTRIBUTES.assetScale]: undefined,
     });
     if (html === undefined) return undefined;
     await writeSources(
@@ -2521,6 +2561,7 @@ export function PlayableEditorWorkspace({
           onWriteMotion={writeMotion}
           onCreateMotion={createMotion}
           onReplaceButtonAsset={replaceButtonAsset}
+          onWriteButtonAssetScale={writeButtonAssetScale}
           onWriteMove={writeMove}
           onWriteTransform={writeTransform}
           onWriteDelete={writeDelete}

@@ -205,6 +205,7 @@ export function PlayableNodeWorkbench({
   onWriteMotion,
   onCreateMotion,
   onReplaceButtonAsset,
+  onWriteButtonAssetScale,
   onWriteMove,
   onWriteTransform,
   onWriteDelete,
@@ -262,6 +263,10 @@ export function PlayableNodeWorkbench({
     pick: PlayablePickResult,
     asset: PlayableAssetRequest,
   ) => Promise<string | undefined>;
+  onWriteButtonAssetScale: (
+    pick: PlayablePickResult,
+    scale: number,
+  ) => Promise<boolean>;
   /** Writes a move back to surface HTML; resolves false when it cannot be made in place. */
   onWriteMove: (move: PlayableMove) => Promise<boolean>;
   /** Writes a visual scale/rotation change back to surface HTML. */
@@ -782,7 +787,12 @@ export function PlayableNodeWorkbench({
           sequence: ++motionSequence.current,
           target: { kind: "element", pick },
           config,
-          ...(pick.buttonAssetId ? { assetId: pick.buttonAssetId } : {}),
+          ...(pick.buttonAssetId
+            ? {
+                assetId: pick.buttonAssetId,
+                assetScale: pick.buttonAssetScale ?? 100,
+              }
+            : {}),
         });
       } catch (cause) {
         releaseRefreshSkip();
@@ -822,7 +832,12 @@ export function PlayableNodeWorkbench({
       setMotionCommand({
         sequence: ++motionSequence.current,
         target: { kind: "element", pick },
-        ...(pick.buttonAssetId ? { assetId: pick.buttonAssetId } : {}),
+        ...(pick.buttonAssetId
+          ? {
+              assetId: pick.buttonAssetId,
+              assetScale: pick.buttonAssetScale ?? 100,
+            }
+          : {}),
       });
     } catch (cause) {
       releaseRefreshSkip();
@@ -853,6 +868,7 @@ export function PlayableNodeWorkbench({
           target: { kind: "element", pick },
           ...(pick.motion ? { config: pick.motion } : {}),
           assetId,
+          assetScale: 100,
           asset: {
             contentType: blob.type || "application/octet-stream",
             bytes: await blob.arrayBuffer(),
@@ -861,7 +877,7 @@ export function PlayableNodeWorkbench({
         setPicks((current) =>
           current.map((item) =>
             playablePickKey(item) === playablePickKey(pick)
-              ? { ...item, buttonAssetId: assetId }
+              ? { ...item, buttonAssetId: assetId, buttonAssetScale: 100 }
               : item,
           ),
         );
@@ -879,6 +895,52 @@ export function PlayableNodeWorkbench({
       reserveRuntimeRefreshSkip,
       showToast,
     ],
+  );
+
+  const previewButtonAssetScale = useCallback(
+    (pick: PlayablePickResult, scale: number) => {
+      if (!pick.source) return;
+      setMediaCommand({
+        command: "button-asset-scale",
+        nodeId: pick.nodeId,
+        cssPath: pick.cssPath,
+        source: pick.source,
+        scale,
+      });
+    },
+    [],
+  );
+
+  const commitButtonAssetScale = useCallback(
+    async (pick: PlayablePickResult, scale: number): Promise<boolean> => {
+      const releaseRefreshSkip = reserveRuntimeRefreshSkip();
+      try {
+        if (!(await onWriteButtonAssetScale(pick, scale))) {
+          releaseRefreshSkip();
+          showToast({
+            tone: "error",
+            text: "无法保存按钮背景图大小",
+          });
+          return false;
+        }
+        setPicks((current) =>
+          current.map((item) =>
+            playablePickKey(item) === playablePickKey(pick)
+              ? { ...item, buttonAssetScale: scale }
+              : item,
+          ),
+        );
+        return true;
+      } catch (cause) {
+        releaseRefreshSkip();
+        showToast({
+          tone: "error",
+          text: `无法保存按钮背景图大小：${errorMessage(cause)}`,
+        });
+        return false;
+      }
+    },
+    [onWriteButtonAssetScale, reserveRuntimeRefreshSkip, showToast],
   );
 
   const onMove = useCallback(
@@ -1238,6 +1300,8 @@ export function PlayableNodeWorkbench({
             onInteractionTiming={onInteractionTiming}
             onApplyMotion={onApplyMotion}
             onRemoveMotion={onRemoveMotion}
+            onPreviewButtonAssetScale={previewButtonAssetScale}
+            onCommitButtonAssetScale={commitButtonAssetScale}
             onTool={setTool}
             mediaState={mediaState}
             onMediaCommand={setMediaCommand}
@@ -1438,6 +1502,8 @@ export function PreviewToolbar({
   onInteractionTiming,
   onApplyMotion,
   onRemoveMotion,
+  onPreviewButtonAssetScale,
+  onCommitButtonAssetScale,
   onTool,
   onUndoStroke,
   onClearStrokes,
@@ -1468,6 +1534,14 @@ export function PreviewToolbar({
     createNew?: boolean,
   ) => Promise<void>;
   onRemoveMotion: () => Promise<void>;
+  onPreviewButtonAssetScale?: (
+    pick: PlayablePickResult,
+    scale: number,
+  ) => void;
+  onCommitButtonAssetScale?: (
+    pick: PlayablePickResult,
+    scale: number,
+  ) => Promise<boolean>;
   onTool: (tool: PreviewTool) => void;
   onUndoStroke: () => void;
   onClearStrokes: () => void;
@@ -1475,6 +1549,39 @@ export function PreviewToolbar({
   media?: ReactNode;
 }) {
   const [motionOpen, setMotionOpen] = useState(false);
+  const selectedButtonAsset = motionSelection?.buttonAssetId
+    ? motionSelection
+    : undefined;
+  const savedAssetScale = selectedButtonAsset?.buttonAssetScale ?? 100;
+  const assetSelectionKey = selectedButtonAsset
+    ? playablePickKey(selectedButtonAsset)
+    : "";
+  const [assetScaleDraft, setAssetScaleDraft] = useState(savedAssetScale);
+  const assetScaleCommitted = useRef({
+    selectionKey: assetSelectionKey,
+    scale: savedAssetScale,
+  });
+  useEffect(() => {
+    setAssetScaleDraft(savedAssetScale);
+    assetScaleCommitted.current = {
+      selectionKey: assetSelectionKey,
+      scale: savedAssetScale,
+    };
+  }, [assetSelectionKey, savedAssetScale]);
+  const commitAssetScaleDraft = async (scale = assetScaleDraft) => {
+    if (
+      !selectedButtonAsset ||
+      scale === assetScaleCommitted.current.scale ||
+      !onCommitButtonAssetScale
+    )
+      return;
+    assetScaleCommitted.current = { selectionKey: assetSelectionKey, scale };
+    if (!(await onCommitButtonAssetScale(selectedButtonAsset, scale))) {
+      assetScaleCommitted.current.scale = savedAssetScale;
+      setAssetScaleDraft(savedAssetScale);
+      onPreviewButtonAssetScale?.(selectedButtonAsset, savedAssetScale);
+    }
+  };
   const fontFamilies =
     textSelection?.fontFamily && !fonts.includes(textSelection.fontFamily)
       ? [textSelection.fontFamily, ...fonts]
@@ -1601,6 +1708,59 @@ export function PreviewToolbar({
               <WandSparkles size={14} />
               <span>动效</span>
             </button>
+          </>
+        ) : null}
+        {tool === "select" && selectedButtonAsset ? (
+          <>
+            <span
+              className="playable-preview-toolbar-divider"
+              aria-hidden="true"
+            />
+            <div
+              className="playable-preview-asset-scale-control"
+              role="group"
+              aria-label="按钮背景图大小"
+            >
+              <span>背景图</span>
+              <input
+                type="range"
+                min="50"
+                max="200"
+                step="1"
+                value={assetScaleDraft}
+                aria-label="按钮背景图大小"
+                aria-valuetext={`${assetScaleDraft}%`}
+                onChange={(event) => {
+                  const scale = Number(event.target.value);
+                  setAssetScaleDraft(scale);
+                  onPreviewButtonAssetScale?.(selectedButtonAsset, scale);
+                }}
+                onPointerUp={() => void commitAssetScaleDraft()}
+                onKeyUp={(event) => {
+                  if (
+                    event.key.startsWith("Arrow") ||
+                    event.key === "Home" ||
+                    event.key === "End"
+                  )
+                    void commitAssetScaleDraft();
+                }}
+                onBlur={() => void commitAssetScaleDraft()}
+              />
+              <output>{assetScaleDraft}%</output>
+              <button
+                type="button"
+                title="重置按钮背景图大小"
+                aria-label="重置按钮背景图大小"
+                disabled={assetScaleDraft === 100}
+                onClick={() => {
+                  setAssetScaleDraft(100);
+                  onPreviewButtonAssetScale?.(selectedButtonAsset, 100);
+                  void commitAssetScaleDraft(100);
+                }}
+              >
+                <RotateCcw size={12} />
+              </button>
+            </div>
           </>
         ) : null}
         {tool === "text" && textSelection ? (

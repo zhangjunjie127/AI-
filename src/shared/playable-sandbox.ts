@@ -78,6 +78,7 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
   #motionCleanups = new WeakMap<HTMLElement, () => void>();
   #motionContexts = new WeakMap<HTMLElement, PlayableNodeContext>();
   #motionContextsBySurface = new Map<string, PlayableNodeContext>();
+  #motionAssetUrlsByElement = new WeakMap<HTMLElement, string>();
   #motionAssetUrls = new Set<string>();
   #surfaceStartedAt = new WeakMap<HTMLElement, number>();
   #timingTimer?: number;
@@ -120,6 +121,36 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
             '[data-media="backdrop"] video',
           );
         if (video) video.loop = command.loop;
+      }
+      return;
+    }
+    if (command.command === "button-asset-scale") {
+      const host = [...this.#nodeLayer.querySelectorAll<HTMLElement>(
+        "[data-playable-surface]",
+      )].find(
+        (candidate) =>
+          candidate.dataset.playableSurface === command.nodeId,
+      );
+      const root = host?.shadowRoot;
+      if (!root) return;
+      try {
+        const element = root.querySelector<HTMLElement>(command.cssPath);
+        if (
+          element?.tagName.toLowerCase() !== "button" ||
+          element.getAttribute(PLAYABLE_SOURCE_ATTRIBUTE) !== command.source
+        )
+          return;
+        const image = element.querySelector<HTMLElement>(
+          "[data-putenggame-button-asset-image] img",
+        );
+        if (!image) return;
+        element.setAttribute(
+          "data-putenggame-button-asset-scale",
+          String(command.scale),
+        );
+        image.style.transform = `scale(${command.scale / 100})`;
+      } catch {
+        return;
       }
       return;
     }
@@ -1354,20 +1385,23 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       [PLAYABLE_MOTION_ATTRIBUTES.signal]: command.config?.signal,
       [PLAYABLE_MOTION_ATTRIBUTES.timeoutSignal]: command.config?.timeoutSignal,
       [PLAYABLE_MOTION_ATTRIBUTES.asset]: command.assetId,
+      [PLAYABLE_MOTION_ATTRIBUTES.assetScale]:
+        command.assetScale === undefined
+          ? undefined
+          : String(command.assetScale),
     }))
       if (value === undefined) element.removeAttribute(name);
       else element.setAttribute(name, value);
 
+    let assetUrl: string | undefined;
     if (command.asset && command.assetId) {
-      const url = URL.createObjectURL(
+      assetUrl = URL.createObjectURL(
         new Blob([command.asset.bytes], { type: command.asset.contentType }),
       );
-      this.#motionAssetUrls.add(url);
-      element.style.backgroundImage = `url("${url}")`;
-      element.style.backgroundSize = "contain";
-      element.style.backgroundPosition = "center";
-      element.style.backgroundRepeat = "no-repeat";
+      this.#motionAssetUrls.add(assetUrl);
+      this.#motionAssetUrlsByElement.set(element, assetUrl);
     }
+    assetUrl ??= this.#motionAssetUrlsByElement.get(element);
     const context =
       this.#motionContexts.get(element) ??
       this.#motionContextsBySurface.get(surfaceId);
@@ -1375,7 +1409,7 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
     if (context)
       this.#motionCleanups.set(
         element,
-        mountPlayableMotionElement(element, context),
+        mountPlayableMotionElement(element, context, assetUrl),
       );
   }
 

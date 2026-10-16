@@ -2,6 +2,7 @@ import { PLAYABLE_SOURCE_ATTRIBUTE } from "./playable-source-locations.js";
 import {
   parsePlayableMotionConfig,
   PLAYABLE_MOTION_ATTRIBUTES,
+  playableButtonAssetScale,
   type PlayableMotionConfig,
 } from "./playable-motion.js";
 
@@ -15,6 +16,7 @@ export interface PlayablePickResult {
   signal?: string;
   motion?: PlayableMotionConfig;
   buttonAssetId?: string;
+  buttonAssetScale?: number;
   tag: string;
   /** The element shows media: an image, a video, or a `data-media` slot for one. */
   media?: true;
@@ -180,6 +182,11 @@ export function describePlayablePick(
   const motion = parsePlayableMotionConfig(target);
   const buttonAssetId =
     target.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.asset) || undefined;
+  const buttonAssetScale = buttonAssetId
+    ? playableButtonAssetScale(
+        target.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.assetScale),
+      )
+    : undefined;
   const media = MEDIA_TAGS.has(tag) || mediaSlot !== null;
   return {
     nodeId: surface.getAttribute(SURFACE_ATTRIBUTE)!,
@@ -188,6 +195,7 @@ export function describePlayablePick(
     ...(signal ? { signal } : {}),
     ...(motion ? { motion } : {}),
     ...(buttonAssetId ? { buttonAssetId } : {}),
+    ...(buttonAssetScale !== undefined ? { buttonAssetScale } : {}),
     tag,
     ...(media ? { media: true as const } : {}),
     ...(mediaSlot ? { mediaSlot } : {}),

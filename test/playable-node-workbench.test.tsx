@@ -251,3 +251,76 @@ it("offers motion presets and applies the chosen interaction mode", async () => 
     false,
   );
 });
+
+it("previews and commits replacement-button image scaling", async () => {
+  const pick = {
+    nodeId: "start",
+    source: "nodes/start/index.html:1:1",
+    cssPath: "button",
+    tag: "button",
+    text: "Continue",
+    buttonAssetId: "button-image",
+    buttonAssetScale: 100,
+    box: { x: 0, y: 0, width: 180, height: 48 },
+  };
+  const onPreviewButtonAssetScale = vi.fn();
+  const onCommitButtonAssetScale = vi.fn(async () => true);
+  await act(async () =>
+    root.render(
+      <PreviewToolbar
+        tool="select"
+        disabled={false}
+        strokes={0}
+        picks={1}
+        motionSelection={pick}
+        motionSignals={[]}
+        mediaState={{ currentTime: 0, duration: 30, paused: true }}
+        onMediaCommand={vi.fn()}
+        onDeleteSelected={vi.fn()}
+        fonts={[]}
+        onTextStyle={vi.fn()}
+        onInteractionTiming={vi.fn()}
+        onApplyMotion={vi.fn(async () => {})}
+        onRemoveMotion={vi.fn(async () => {})}
+        onPreviewButtonAssetScale={onPreviewButtonAssetScale}
+        onCommitButtonAssetScale={onCommitButtonAssetScale}
+        onTool={vi.fn()}
+        onUndoStroke={vi.fn()}
+        onClearStrokes={vi.fn()}
+      />,
+    ),
+  );
+
+  const slider = container.querySelector<HTMLInputElement>(
+    '.playable-preview-asset-scale-control input[type="range"]',
+  )!;
+  expect(container.querySelector("output")?.textContent).toBe("100%");
+  expect(slider.min).toBe("50");
+  expect(slider.max).toBe("200");
+  expect(slider.step).toBe("1");
+
+  await act(async () => {
+    Object.defineProperty(slider, "value", {
+      configurable: true,
+      get: () => "135",
+    });
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect(container.querySelector("output")?.textContent).toBe("135%");
+  expect(onPreviewButtonAssetScale).toHaveBeenCalledWith(pick, 135);
+
+  await act(async () =>
+    slider.dispatchEvent(new PointerEvent("pointerup", { bubbles: true })),
+  );
+  expect(onCommitButtonAssetScale).toHaveBeenCalledWith(pick, 135);
+
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>(
+        '[aria-label="重置按钮背景图大小"]',
+      )!
+      .click(),
+  );
+  expect(onPreviewButtonAssetScale).toHaveBeenLastCalledWith(pick, 100);
+  expect(onCommitButtonAssetScale).toHaveBeenLastCalledWith(pick, 100);
+});

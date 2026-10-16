@@ -43,6 +43,13 @@ export type PlayableMediaCommand =
   | { command: "play" }
   | { command: "pause" }
   | { command: "backdrop-loop"; loop: boolean }
+  | {
+      command: "button-asset-scale";
+      nodeId: string;
+      cssPath: string;
+      source: string;
+      scale: number;
+    }
   | { command: "seek"; time: number };
 
 export interface PlayableMediaState {
@@ -130,6 +137,7 @@ export interface PlayableMotionCommand {
     | { kind: "create"; id: string; nodeId: string; source: string };
   config?: PlayableMotionConfig;
   assetId?: string;
+  assetScale?: number;
   asset?: PlayableAssetTransfer;
 }
 
@@ -475,6 +483,11 @@ export function isPlayableHostMessage(
           (command.config.signal !== undefined && typeof command.config.signal !== "string") ||
           (command.config.timeoutSignal !== undefined && typeof command.config.timeoutSignal !== "string"))) ||
       (command.assetId !== undefined && typeof command.assetId !== "string") ||
+      (command.assetScale !== undefined &&
+        (typeof command.assetScale !== "number" ||
+          !Number.isInteger(command.assetScale) ||
+          command.assetScale < 50 ||
+          command.assetScale > 200)) ||
       (command.asset !== undefined &&
         (!isRecord(command.asset) ||
           typeof command.asset.contentType !== "string" ||
@@ -496,6 +509,14 @@ export function isPlayableHostMessage(
         value.command.command === "pause" ||
         (value.command.command === "backdrop-loop" &&
           typeof value.command.loop === "boolean") ||
+        (value.command.command === "button-asset-scale" &&
+          typeof value.command.nodeId === "string" &&
+          typeof value.command.cssPath === "string" &&
+          typeof value.command.source === "string" &&
+          typeof value.command.scale === "number" &&
+          Number.isInteger(value.command.scale) &&
+          value.command.scale >= 50 &&
+          value.command.scale <= 200) ||
         (value.command.command === "seek" &&
           typeof value.command.time === "number" &&
           Number.isFinite(value.command.time) &&

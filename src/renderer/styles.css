@@ -16684,6 +16684,34 @@ button {
   font: inherit;
   font-size: 10px;
 }
+.playable-preview-asset-scale-control {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.playable-preview-asset-scale-control input[type="range"] {
+  width: 96px;
+  height: 16px;
+  margin: 0;
+  accent-color: #858b95;
+  cursor: pointer;
+}
+.playable-preview-asset-scale-control output {
+  width: 34px;
+  color: var(--text);
+  text-align: right;
+}
+.playable-preview-toolbar .playable-preview-asset-scale-control button {
+  width: 24px;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+}
 .playable-preview-toolbar-divider {
   width: 1px;
   height: 18px;

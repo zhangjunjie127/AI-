@@ -64,14 +64,15 @@ it("keeps the existing button signal handler when an interactive motion is attac
   cleanup();
 });
 
-it("shows a replacement asset in full without changing the button hit area", () => {
+it("scales only the replacement image while keeping the button hit area intact", () => {
   const button = document.createElement("button");
   button.style.width = "180px";
   button.style.height = "48px";
-  button.style.backgroundSize = "cover";
-  button.style.backgroundPosition = "left top";
-  button.style.backgroundRepeat = "repeat";
+  button.style.backgroundImage = 'url("original.png")';
+  button.style.position = "absolute";
+  button.style.isolation = "auto";
   button.setAttribute("data-putenggame-button-asset", "replacement");
+  button.setAttribute("data-putenggame-button-asset-scale", "150");
 
   const cleanup = mountPlayableMotionElement(button, {
     root: document.createElement("div").attachShadow({ mode: "open" }),
@@ -87,17 +88,22 @@ it("shows a replacement asset in full without changing the button hit area", () 
     },
   });
 
-  expect(button.style.backgroundImage).toContain("/assets/replacement.png");
-  expect(button.style.backgroundSize).toBe("contain");
-  expect(button.style.backgroundPosition).toBe("center center");
-  expect(button.style.backgroundRepeat).toBe("no-repeat");
+  const image = button.querySelector<HTMLImageElement>(
+    "[data-putenggame-button-asset-image] img",
+  )!;
+  expect(image.src).toContain("/assets/replacement.png");
+  expect(image.style.objectFit).toBe("contain");
+  expect(image.style.transform).toBe("scale(1.5)");
+  expect(button.style.backgroundImage).toBe("none");
+  expect(button.style.isolation).toBe("isolate");
   expect(button.style.width).toBe("180px");
   expect(button.style.height).toBe("48px");
 
   cleanup();
-  expect(button.style.backgroundSize).toBe("cover");
-  expect(button.style.backgroundPosition).toBe("left top");
-  expect(button.style.backgroundRepeat).toBe("repeat");
+  expect(button.querySelector("[data-putenggame-button-asset-image]")).toBeNull();
+  expect(button.style.backgroundImage).toContain("original.png");
+  expect(button.style.isolation).toBe("auto");
+  expect(button.style.position).toBe("absolute");
 });
 
 it("routes a completed hold to success and an untouched charge to timeout", () => {
