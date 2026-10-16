@@ -91,7 +91,9 @@ import {
   clearPlayableBackdrop,
   playableBackdrop,
   playableBackdropAsset,
+  playableBackdropLoops,
   setPlayableBackdrop,
+  setPlayableBackdropLoop,
 } from "../shared/playable-backdrop.js";
 import {
   addPlayableNodeAsset,
@@ -374,19 +376,32 @@ export function PlayableEditorWorkspace({
 
   // Whether the open Scene has a background the editor can set, and whether it shows anything yet.
   const [backdrop, setBackdrop] = useState<"missing" | "set">();
+  const [backdropType, setBackdropType] = useState<"image" | "video">();
+  const [backdropLoop, setBackdropLoop] = useState(false);
   const openedHtml = openedNode?.source.html;
   useEffect(() => {
     setBackdrop(undefined);
+    setBackdropType(undefined);
+    setBackdropLoop(false);
     if (!openedHtml) return;
     let disposed = false;
     void getWorkspaceFile(projectId, openedHtml).then(
       (file) => {
-        if (!disposed)
+        if (!disposed) {
           setBackdrop(
             file.content !== undefined && !file.truncated
               ? playableBackdrop(file.content)
               : undefined,
           );
+          const html =
+            file.content !== undefined && !file.truncated
+              ? file.content
+              : undefined;
+          setBackdropType(
+            html ? playableBackdropAsset(html)?.type : undefined,
+          );
+          setBackdropLoop(html ? playableBackdropLoops(html) : false);
+        }
       },
       () => undefined,
     );
@@ -1736,6 +1751,30 @@ export function PlayableEditorWorkspace({
     return true;
   }
 
+  async function writeBackdropLoop(
+    nodeId: string,
+    loop: boolean,
+  ): Promise<boolean> {
+    const graph = codebase?.graph;
+    const node = graph?.nodes.find((candidate) => candidate.id === nodeId);
+    if (!graph || !node) return false;
+    const path = node.source.html;
+    const file = await getWorkspaceFile(projectId, path);
+    if (file.content === undefined || file.truncated) return false;
+    const before = file.content;
+    const html = setPlayableBackdropLoop(before, loop);
+    if (html === undefined) return false;
+    if (html !== before)
+      await writeSources(
+        graph,
+        { [path]: html },
+        { [path]: before },
+        "设置背景视频播放方式",
+      );
+    setBackdropLoop(loop);
+    return true;
+  }
+
   function openNode(nodeId: string): void {
     setCanvasContextMenu(undefined);
     setSelectedEdgeId(undefined);
@@ -2499,7 +2538,12 @@ export function PlayableEditorWorkspace({
           }}
           onSetBackdrop={(asset) => writeBackdrop(openedNode.id, asset)}
           onRemoveBackdrop={() => removeBackdrop(openedNode.id)}
+          onWriteBackdropLoop={(loop) =>
+            writeBackdropLoop(openedNode.id, loop)
+          }
           {...(backdrop ? { backdrop } : {})}
+          {...(backdropType ? { backdropType } : {})}
+          backdropLoop={backdropLoop}
           backdropEffects={backdropEffects}
           onPlayFromHere={(start) => void startPlaytest(start)}
           onChatContextChange={onChatContextChange}

@@ -161,6 +161,23 @@ describe("Playable sandbox", () => {
       }),
     ).toBe(false);
   });
+
+  it("validates background-video loop commands", () => {
+    expect(
+      isPlayableHostMessage({
+        kind: "putenggame:playable:media-command",
+        instanceId: "instance",
+        command: { command: "backdrop-loop", loop: true },
+      }),
+    ).toBe(true);
+    expect(
+      isPlayableHostMessage({
+        kind: "putenggame:playable:media-command",
+        instanceId: "instance",
+        command: { command: "backdrop-loop", loop: "true" },
+      }),
+    ).toBe(false);
+  });
 });
 
 interface FakeMeta {

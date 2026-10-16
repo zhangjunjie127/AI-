@@ -11,6 +11,7 @@ import {
 import {
   ArrowRight,
   Brush,
+  Check,
   Image,
   ImageOff,
   InfoCircle,
@@ -211,7 +212,10 @@ export function PlayableNodeWorkbench({
   onAddAsset,
   onSetBackdrop,
   onRemoveBackdrop,
+  onWriteBackdropLoop,
   backdrop,
+  backdropType,
+  backdropLoop,
   backdropEffects,
   onPlayFromHere,
   onChatContextChange,
@@ -277,8 +281,12 @@ export function PlayableNodeWorkbench({
    * takes back; resolves false when there is no background to clear.
    */
   onRemoveBackdrop?: () => Promise<boolean>;
+  /** Persists this Node's background-video loop preference. */
+  onWriteBackdropLoop: (loop: boolean) => Promise<boolean>;
   /** Whether the Scene's background shows anything yet; unset when the editor cannot set it. */
   backdrop?: "missing" | "set";
+  backdropType?: "image" | "video";
+  backdropLoop: boolean;
   backdropEffects: PlayableBackdropEffects;
   /** Opens a Playtest that starts at this Scene. */
   onPlayFromHere?: (start: PlaytestStart) => void;
@@ -1056,6 +1064,30 @@ export function PlayableNodeWorkbench({
     }
   }, [onRemoveBackdrop, showToast]);
 
+  const writeBackdropLoop = useCallback(
+    async (loop: boolean) => {
+      const releaseRefreshSkip = reserveRuntimeRefreshSkip();
+      try {
+        if (!(await onWriteBackdropLoop(loop))) {
+          releaseRefreshSkip();
+          showToast({
+            tone: "error",
+            text: "无法保存背景视频播放方式",
+          });
+          return;
+        }
+        setMediaCommand({ command: "backdrop-loop", loop });
+      } catch (cause) {
+        releaseRefreshSkip();
+        showToast({
+          tone: "error",
+          text: `无法保存背景视频播放方式：${errorMessage(cause)}`,
+        });
+      }
+    },
+    [onWriteBackdropLoop, reserveRuntimeRefreshSkip, showToast],
+  );
+
   const preview: PlayablePreviewOptions = {
     policy: "report",
     startNodeId: node.id,
@@ -1218,9 +1250,14 @@ export function PlayableNodeWorkbench({
                 uploading={chooser.uploading}
                 canSetBackdrop={canSetBackdrop}
                 canRemoveBackdrop={canRemoveBackdrop}
+                canSetBackdropLoop={
+                  backdrop === "set" && backdropType === "video"
+                }
+                backdropLoop={backdropLoop}
                 canReplaceButton={tool === "select" && picks.at(-1)?.tag === "button"}
                 onChoose={chooser.choose}
                 onRemoveBackdrop={() => void removeBackdrop()}
+                onBackdropLoopChange={(loop) => void writeBackdropLoop(loop)}
               />
             }
           />
@@ -2295,17 +2332,23 @@ function MediaMenu({
   uploading,
   canSetBackdrop,
   canRemoveBackdrop,
+  canSetBackdropLoop,
+  backdropLoop,
   canReplaceButton,
   onChoose,
   onRemoveBackdrop,
+  onBackdropLoopChange,
 }: {
   disabled: boolean;
   uploading: boolean;
   canSetBackdrop: boolean;
   canRemoveBackdrop: boolean;
+  canSetBackdropLoop: boolean;
+  backdropLoop: boolean;
   canReplaceButton: boolean;
   onChoose: (to: MediaTarget) => void;
   onRemoveBackdrop: () => void;
+  onBackdropLoopChange: (loop: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
@@ -2373,6 +2416,31 @@ function MediaMenu({
             <MessageSquarePlus size={13} />
             <span>添加到聊天</span>
           </button>
+          {canSetBackdropLoop ? (
+            <>
+              <div className="playable-preview-media-heading">
+                背景视频播放方式
+              </div>
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={!backdropLoop}
+                onClick={() => onBackdropLoopChange(false)}
+              >
+                <span>单次播放</span>
+                {!backdropLoop ? <Check size={14} /> : null}
+              </button>
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={backdropLoop}
+                onClick={() => onBackdropLoopChange(true)}
+              >
+                <span>循环播放</span>
+                {backdropLoop ? <Check size={14} /> : null}
+              </button>
+            </>
+          ) : null}
           {canRemoveBackdrop ? (
             <button
               type="button"

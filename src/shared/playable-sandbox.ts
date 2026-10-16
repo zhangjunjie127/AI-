@@ -111,6 +111,18 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
   }
 
   controlMedia(command: PlayableMediaCommand): void {
+    if (command.command === "backdrop-loop") {
+      for (const host of this.#nodeLayer.querySelectorAll<HTMLElement>(
+        "[data-playable-surface]",
+      )) {
+        const video =
+          host.shadowRoot?.querySelector<HTMLVideoElement>(
+            '[data-media="backdrop"] video',
+          );
+        if (video) video.loop = command.loop;
+      }
+      return;
+    }
     const video =
       this.#mediaVideos().find((candidate) => !candidate.paused) ??
       this.#mediaVideos()[0];

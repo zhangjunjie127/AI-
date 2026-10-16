@@ -135,7 +135,7 @@ describe("playScene", () => {
     const { scene, backdrop, emitted, click, cleanup } = await mountScene({ "data-asset": "opening", "data-type": "video" });
     const video = backdrop.children[0]!;
     expect(video).toMatchObject({ tagName: "video", src: "blob:opening" });
-    expect(video.loop).toBeUndefined();
+    expect(video.loop).toBe(false);
     expect(scene.children).toEqual([backdrop]);
     video.listeners.get("ended")!();
     click();
@@ -144,6 +144,19 @@ describe("playScene", () => {
     expect(video.paused).toBe(true);
     expect(video.removed).toBe(true);
     expect(scene.listeners.size).toBe(0);
+  });
+
+  it("loops a background video when the Node enables looping", async () => {
+    const { backdrop, emitted, click, cleanup } = await mountScene({
+      "data-asset": "opening",
+      "data-type": "video",
+      "data-loop": "true",
+    });
+    const video = backdrop.children[0]!;
+    expect(video.loop).toBe(true);
+    click();
+    expect(emitted).toEqual(["next"]);
+    cleanup();
   });
 
   it("shows a background image the player clicks past", async () => {

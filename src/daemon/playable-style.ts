@@ -672,8 +672,9 @@ kbd,
   "shared/style/components.js": `/**
  * Shows the Node's background: the one \`.backdrop\` element, whose
  * \`data-asset\` and \`data-type\` ("image" or "video") name a declared
- * Asset. A video plays once with sound and stops on its last frame. The
- * editor sets the two attributes itself, so change the background there
+ * Asset. A video plays once with sound and stops on its last frame by default;
+ * set data-loop="true" on the backdrop to loop it. The editor sets the
+ * background attributes itself, so change the background there
  * rather than adding media elements. Call it from mount().
  *
  * @param {object} context the Node context passed to mount
@@ -694,6 +695,7 @@ export function showBackdrop(context) {
   const video = document.createElement("video");
   video.src = url;
   video.playsInline = true;
+  video.loop = backdrop.getAttribute("data-loop") === "true";
   backdrop.append(video);
   // Where sound may not start on its own, play muted rather than stay black.
   video.play?.().catch(() => {

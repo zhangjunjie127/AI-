@@ -16891,6 +16891,17 @@ button {
   button:hover:not(:disabled) {
   background: var(--menu-hover);
 }
+.playable-preview-popover.is-media .playable-preview-media-heading {
+  padding: 7px 8px 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+.playable-preview-toolbar .playable-preview-popover.is-media button[aria-checked="true"] {
+  background: var(--control-selected);
+}
+.playable-preview-popover.is-media button[role="menuitemradio"] {
+  justify-content: space-between;
+}
 
 .story-workbench-preview.is-capturing
   :is(

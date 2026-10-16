@@ -42,6 +42,7 @@ export type PlayablePreviewTool = "select" | "text" | "move";
 export type PlayableMediaCommand =
   | { command: "play" }
   | { command: "pause" }
+  | { command: "backdrop-loop"; loop: boolean }
   | { command: "seek"; time: number };
 
 export interface PlayableMediaState {
@@ -493,6 +494,8 @@ export function isPlayableHostMessage(
       isRecord(value.command) &&
       (value.command.command === "play" ||
         value.command.command === "pause" ||
+        (value.command.command === "backdrop-loop" &&
+          typeof value.command.loop === "boolean") ||
         (value.command.command === "seek" &&
           typeof value.command.time === "number" &&
           Number.isFinite(value.command.time) &&

@@ -5,6 +5,7 @@ const BACKDROP_TAG = /<[a-zA-Z][\w-]*\b[^>]*\sdata-media\s*=\s*(?:"backdrop"|'ba
 const ASSET_ATTRIBUTE = /\sdata-(?:asset|type)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>/]+)/g;
 const ASSET_ID_ATTRIBUTE = /\sdata-asset\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/;
 const ASSET_TYPE_ATTRIBUTE = /\sdata-type\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/;
+const LOOP_ATTRIBUTE = /\sdata-loop\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/;
 
 /** The Node's one background tag, or undefined when there is none or more than one. */
 function backdropTag(html: string): RegExpExecArray | undefined {
@@ -32,6 +33,33 @@ export function playableBackdropAsset(html: string): { assetId: string; type: Ex
   const type = typeMatch?.[1] ?? typeMatch?.[2] ?? typeMatch?.[3];
   if (!assetId || (type !== "image" && type !== "video")) return undefined;
   return { assetId, type };
+}
+
+/** Whether this Node's background video is set to loop. */
+export function playableBackdropLoops(html: string): boolean {
+  const tag = backdropTag(html);
+  const match = tag && LOOP_ATTRIBUTE.exec(tag[0]);
+  return (match?.[1] ?? match?.[2] ?? match?.[3]) === "true";
+}
+
+/** Sets or clears this Node's background-video loop option. */
+export function setPlayableBackdropLoop(
+  html: string,
+  loop: boolean,
+): string | undefined {
+  const tag = backdropTag(html);
+  if (!tag) return undefined;
+  const current = LOOP_ATTRIBUTE.exec(tag[0]);
+  let opening = tag[0];
+  if (current) {
+    opening = loop
+      ? `${opening.slice(0, current.index)} data-loop="true"${opening.slice(current.index + current[0].length)}`
+      : `${opening.slice(0, current.index)}${opening.slice(current.index + current[0].length)}`;
+  } else if (loop) {
+    const close = opening.endsWith("/>") ? "/>" : ">";
+    opening = `${opening.slice(0, -close.length).trimEnd()} data-loop="true"${close}`;
+  }
+  return `${html.slice(0, tag.index)}${opening}${html.slice(tag.index + tag[0].length)}`;
 }
 
 /**

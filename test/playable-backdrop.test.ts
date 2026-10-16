@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { PLAYABLE_PRESETS } from "../src/daemon/playable-presets.js";
-import { clearPlayableBackdrop, playableBackdrop, playableBackdropAsset, setPlayableBackdrop } from "../src/shared/playable-backdrop.js";
+import {
+  clearPlayableBackdrop,
+  playableBackdrop,
+  playableBackdropAsset,
+  playableBackdropLoops,
+  setPlayableBackdrop,
+  setPlayableBackdropLoop,
+} from "../src/shared/playable-backdrop.js";
 
 describe("setPlayableBackdrop", () => {
   it("sets the background of every Template", () => {
@@ -60,5 +67,33 @@ describe("playableBackdropAsset", () => {
   it("ignores missing or unsupported background metadata", () => {
     expect(playableBackdropAsset('<main><div data-media="backdrop" data-asset="opening"></div></main>')).toBeUndefined();
     expect(playableBackdropAsset('<main><div data-media="backdrop" data-asset="model" data-type="model"></div></main>')).toBeUndefined();
+  });
+});
+
+describe("background video loop preference", () => {
+  it("defaults to single playback and stores the choice on this Node's backdrop", () => {
+    const html =
+      '<main><div class="backdrop" data-media="backdrop" data-asset="opening" data-type="video"></div></main>';
+    const looping = setPlayableBackdropLoop(html, true)!;
+    expect(looping).toContain('data-loop="true"');
+    expect(playableBackdropLoops(looping)).toBe(true);
+    expect(playableBackdropLoops(html)).toBe(false);
+    expect(playableBackdropLoops(setPlayableBackdropLoop(looping, false)!)).toBe(
+      false,
+    );
+  });
+
+  it("preserves the preference when changing or removing the media asset", () => {
+    const html =
+      '<main><div class="backdrop" data-media="backdrop" data-asset="opening" data-type="video" data-loop="true"></div></main>';
+    expect(playableBackdropLoops(setPlayableBackdrop(html, "next", "video")!))
+      .toBe(true);
+    expect(playableBackdropLoops(clearPlayableBackdrop(html)!)).toBe(true);
+  });
+
+  it("does not alter other Nodes when a loop preference is set", () => {
+    const html =
+      '<main><div data-media="backdrop"></div><div data-media="backdrop"></div></main>';
+    expect(setPlayableBackdropLoop(html, true)).toBeUndefined();
   });
 });
