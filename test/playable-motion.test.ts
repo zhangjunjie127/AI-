@@ -65,7 +65,7 @@ it("keeps the existing button signal handler when an interactive motion is attac
   cleanup();
 });
 
-it("scales only the replacement image while keeping the button hit area intact", () => {
+it("scales the replacement image and button hit area together without cropping", () => {
   const button = document.createElement("button");
   button.style.width = "180px";
   button.style.height = "48px";
@@ -95,7 +95,8 @@ it("scales only the replacement image while keeping the button hit area intact",
   )!;
   expect(image.src).toContain("/assets/replacement.png");
   expect(image.style.objectFit).toBe("contain");
-  expect(image.style.transform).toBe("scale(1.5, 0.8)");
+  expect(image.style.transform).toBe("");
+  expect(button.style.scale).toBe("1.5 0.8");
   expect(button.style.backgroundImage).toBe("none");
   expect(button.style.isolation).toBe("isolate");
   expect(button.style.width).toBe("180px");
@@ -105,6 +106,7 @@ it("scales only the replacement image while keeping the button hit area intact",
   expect(button.querySelector("[data-putenggame-button-asset-image]")).toBeNull();
   expect(button.style.backgroundImage).toContain("original.png");
   expect(button.style.isolation).toBe("auto");
+  expect(button.style.scale).toBe("");
   expect(button.style.position).toBe("absolute");
 });
 

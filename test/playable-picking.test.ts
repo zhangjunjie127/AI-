@@ -1512,6 +1512,99 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
     ).toBe(5);
   });
 
+  it("refreshes a selected button outline when its replacement image is resized", async () => {
+    const window = new Window();
+    Object.defineProperty(window, "top", { value: {} });
+    Object.defineProperty(window, "origin", { value: "null" });
+    Object.assign(globalThis, {
+      MutationObserver: window.MutationObserver,
+      HTMLElement: window.HTMLElement,
+      Element: window.Element,
+      ShadowRoot: window.ShadowRoot,
+      Event: window.Event,
+      getComputedStyle: window.getComputedStyle.bind(window),
+    });
+    const document = window.document as unknown as Document;
+    const host = new DocumentPlayableSurfaceHost(document, async () => ({
+      mount: async () => undefined,
+    }));
+    await host.mountNode(
+      {
+        id: "choice",
+        html: '<main><button data-putenggame-source="nodes/choice/index.html:1:7" data-putenggame-button-asset="button-image">Choice</button></main>',
+        css: "",
+        javascript: "",
+        inputs: [],
+      },
+      { assets: { url: () => "/button-image.png" } } as never,
+    );
+    const root = document.querySelector<HTMLElement>(
+      '[data-playable-sandbox="true"]',
+    )!;
+    const surface = document.querySelector<HTMLElement>(
+      '[data-playable-surface="choice"]',
+    )!;
+    const button = surface.shadowRoot!.querySelector<HTMLButtonElement>("button")!;
+    let box = { x: 100, y: 120, width: 100, height: 40 };
+    Object.defineProperty(root, "getBoundingClientRect", {
+      value: () => ({ x: 0, y: 0, width: 720, height: 1280 }),
+    });
+    Object.defineProperty(button, "getBoundingClientRect", {
+      value: () => box,
+    });
+    host.startPicking("select", {
+      onPick: () => undefined,
+      onTextSelect: () => undefined,
+      onInteractionSelect: () => undefined,
+      onTextEdit: () => undefined,
+      onTextCreate: () => undefined,
+      onMove: () => undefined,
+      onTransform: () => undefined,
+      onDelete: () => undefined,
+      onPasteElements: async () => undefined,
+      onCancel: () => undefined,
+    });
+
+    const down = new Event("pointerdown", { bubbles: true, composed: true });
+    Object.assign(down, {
+      button: 0,
+      pointerId: 1,
+      clientX: 110,
+      clientY: 130,
+      shiftKey: false,
+      metaKey: false,
+      ctrlKey: false,
+    });
+    button.dispatchEvent(down);
+    const up = new Event("pointerup", { bubbles: true, composed: true });
+    Object.assign(up, { button: 0, pointerId: 1, clientX: 110, clientY: 130 });
+    button.dispatchEvent(up);
+    const click = new Event("click", { bubbles: true, composed: true });
+    Object.assign(click, { clientX: 110, clientY: 130 });
+    button.dispatchEvent(click);
+
+    const outline = root.querySelector<HTMLElement>(
+      '[data-playable-pick-outline="true"]',
+    )!;
+    expect(outline.style.width).toBe("100px");
+    box = { x: 50, y: 100, width: 200, height: 40 };
+    host.controlMedia({
+      command: "button-asset-scale",
+      nodeId: "choice",
+      cssPath: "main > button",
+      source: "nodes/choice/index.html:1:7",
+      scaleX: 200,
+      scaleY: 100,
+    });
+
+    expect(button.style.scale).toBe("2 1");
+    expect(outline.style.left).toBe("50px");
+    expect(outline.style.width).toBe("200px");
+
+    host.destroy();
+    window.close();
+  });
+
   it("routes undo and redo shortcuts pressed in the scene preview to its editor", async () => {
     const window = new Window();
     Object.defineProperty(window, "top", { value: {} });

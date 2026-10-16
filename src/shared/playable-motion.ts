@@ -221,6 +221,7 @@ function mountPlayableButtonAsset(
     backgroundImage: element.style.backgroundImage,
     isolation: element.style.isolation,
     position: element.style.position,
+    scale: element.style.scale,
   };
   const layer = element.ownerDocument.createElement("span");
   layer.dataset.putenggameButtonAssetImage = "";
@@ -242,13 +243,12 @@ function mountPlayableButtonAsset(
     width: "100%",
     height: "100%",
     objectFit: "contain",
-    transformOrigin: "center",
-    transform: `scale(${x / 100}, ${y / 100})`,
   });
   layer.append(image);
   element.prepend(layer);
   element.style.backgroundImage = "none";
   element.style.isolation = "isolate";
+  element.style.scale = `${x / 100} ${y / 100}`;
   if (view?.getComputedStyle(element).position === "static")
     element.style.position = "relative";
   return () => {
@@ -256,6 +256,7 @@ function mountPlayableButtonAsset(
     element.style.backgroundImage = previous.backgroundImage;
     element.style.isolation = previous.isolation;
     element.style.position = previous.position;
+    element.style.scale = previous.scale;
   };
 }
 

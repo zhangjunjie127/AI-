@@ -68,6 +68,7 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
   readonly #nodeLayer: HTMLElement;
   #picking?: {
     stop: () => void;
+    refresh: () => void;
     delete: (pick: PlayablePickResult) => void;
     copy: () => void;
     paste: () => Promise<void>;
@@ -140,10 +141,12 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
           element.getAttribute(PLAYABLE_SOURCE_ATTRIBUTE) !== command.source
         )
           return;
-        const image = element.querySelector<HTMLElement>(
-          "[data-putenggame-button-asset-image] img",
-        );
-        if (!image) return;
+        if (
+          !element.querySelector(
+            "[data-putenggame-button-asset-image] img",
+          )
+        )
+          return;
         element.setAttribute(
           PLAYABLE_MOTION_ATTRIBUTES.assetScaleX,
           String(command.scaleX),
@@ -152,7 +155,8 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
           PLAYABLE_MOTION_ATTRIBUTES.assetScaleY,
           String(command.scaleY),
         );
-        image.style.transform = `scale(${command.scaleX / 100}, ${command.scaleY / 100})`;
+        element.style.scale = `${command.scaleX / 100} ${command.scaleY / 100}`;
+        this.#picking?.refresh();
       } catch {
         return;
       }
@@ -1203,6 +1207,7 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
     this.#picking = {
       copy: copySelected,
       paste: pasteCopied,
+      refresh: placeSelected,
       delete: (pick) => {
         const key = selectionKey(pick);
         const current = selectedElements.find(
