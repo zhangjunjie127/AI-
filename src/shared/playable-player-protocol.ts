@@ -4,7 +4,11 @@ import type { PlayableTransform, PlayableTranslate } from "./playable-move.js";
 import type { PlayablePickResult } from "./playable-picker.js";
 import type { PlayableSeen } from "./playable-story-map.js";
 import type { PlayableBackdropEffects } from "./playable-backdrop-effects.js";
-import type { PlayableMotionConfig } from "./playable-motion.js";
+import {
+  PLAYABLE_BUTTON_ASSET_SCALE_MAX,
+  PLAYABLE_BUTTON_ASSET_SCALE_MIN,
+  type PlayableMotionConfig,
+} from "./playable-motion.js";
 import type {
   NodeRuntimePolicy,
   NodeRuntimeSnapshot,
@@ -48,7 +52,8 @@ export type PlayableMediaCommand =
       nodeId: string;
       cssPath: string;
       source: string;
-      scale: number;
+      scaleX: number;
+      scaleY: number;
     }
   | { command: "seek"; time: number };
 
@@ -137,7 +142,8 @@ export interface PlayableMotionCommand {
     | { kind: "create"; id: string; nodeId: string; source: string };
   config?: PlayableMotionConfig;
   assetId?: string;
-  assetScale?: number;
+  assetScaleX?: number;
+  assetScaleY?: number;
   asset?: PlayableAssetTransfer;
 }
 
@@ -483,11 +489,16 @@ export function isPlayableHostMessage(
           (command.config.signal !== undefined && typeof command.config.signal !== "string") ||
           (command.config.timeoutSignal !== undefined && typeof command.config.timeoutSignal !== "string"))) ||
       (command.assetId !== undefined && typeof command.assetId !== "string") ||
-      (command.assetScale !== undefined &&
-        (typeof command.assetScale !== "number" ||
-          !Number.isInteger(command.assetScale) ||
-          command.assetScale < 50 ||
-          command.assetScale > 200)) ||
+      (command.assetScaleX !== undefined &&
+        (typeof command.assetScaleX !== "number" ||
+          !Number.isInteger(command.assetScaleX) ||
+          command.assetScaleX < PLAYABLE_BUTTON_ASSET_SCALE_MIN ||
+          command.assetScaleX > PLAYABLE_BUTTON_ASSET_SCALE_MAX)) ||
+      (command.assetScaleY !== undefined &&
+        (typeof command.assetScaleY !== "number" ||
+          !Number.isInteger(command.assetScaleY) ||
+          command.assetScaleY < PLAYABLE_BUTTON_ASSET_SCALE_MIN ||
+          command.assetScaleY > PLAYABLE_BUTTON_ASSET_SCALE_MAX)) ||
       (command.asset !== undefined &&
         (!isRecord(command.asset) ||
           typeof command.asset.contentType !== "string" ||
@@ -513,10 +524,14 @@ export function isPlayableHostMessage(
           typeof value.command.nodeId === "string" &&
           typeof value.command.cssPath === "string" &&
           typeof value.command.source === "string" &&
-          typeof value.command.scale === "number" &&
-          Number.isInteger(value.command.scale) &&
-          value.command.scale >= 50 &&
-          value.command.scale <= 200) ||
+          typeof value.command.scaleX === "number" &&
+          Number.isInteger(value.command.scaleX) &&
+          value.command.scaleX >= PLAYABLE_BUTTON_ASSET_SCALE_MIN &&
+          value.command.scaleX <= PLAYABLE_BUTTON_ASSET_SCALE_MAX &&
+          typeof value.command.scaleY === "number" &&
+          Number.isInteger(value.command.scaleY) &&
+          value.command.scaleY >= PLAYABLE_BUTTON_ASSET_SCALE_MIN &&
+          value.command.scaleY <= PLAYABLE_BUTTON_ASSET_SCALE_MAX) ||
         (value.command.command === "seek" &&
           typeof value.command.time === "number" &&
           Number.isFinite(value.command.time) &&

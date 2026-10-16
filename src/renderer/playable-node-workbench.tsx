@@ -24,6 +24,7 @@ import {
   Pause,
   Play,
   RotateCcw,
+  SlidersHorizontal,
   Trash2,
   Type,
   Undo2,
@@ -104,6 +105,8 @@ import {
   type PlayableAffectionConfig,
 } from "../shared/playable-affection.js";
 import {
+  PLAYABLE_BUTTON_ASSET_SCALE_MAX,
+  PLAYABLE_BUTTON_ASSET_SCALE_MIN,
   type PlayableMotionConfig,
   type PlayableMotionKind,
 } from "../shared/playable-motion.js";
@@ -265,7 +268,8 @@ export function PlayableNodeWorkbench({
   ) => Promise<string | undefined>;
   onWriteButtonAssetScale: (
     pick: PlayablePickResult,
-    scale: number,
+    scaleX: number,
+    scaleY: number,
   ) => Promise<boolean>;
   /** Writes a move back to surface HTML; resolves false when it cannot be made in place. */
   onWriteMove: (move: PlayableMove) => Promise<boolean>;
@@ -790,7 +794,8 @@ export function PlayableNodeWorkbench({
           ...(pick.buttonAssetId
             ? {
                 assetId: pick.buttonAssetId,
-                assetScale: pick.buttonAssetScale ?? 100,
+                assetScaleX: pick.buttonAssetScaleX ?? 100,
+                assetScaleY: pick.buttonAssetScaleY ?? 100,
               }
             : {}),
         });
@@ -835,7 +840,8 @@ export function PlayableNodeWorkbench({
         ...(pick.buttonAssetId
           ? {
               assetId: pick.buttonAssetId,
-              assetScale: pick.buttonAssetScale ?? 100,
+              assetScaleX: pick.buttonAssetScaleX ?? 100,
+              assetScaleY: pick.buttonAssetScaleY ?? 100,
             }
           : {}),
       });
@@ -868,7 +874,8 @@ export function PlayableNodeWorkbench({
           target: { kind: "element", pick },
           ...(pick.motion ? { config: pick.motion } : {}),
           assetId,
-          assetScale: 100,
+          assetScaleX: 100,
+          assetScaleY: 100,
           asset: {
             contentType: blob.type || "application/octet-stream",
             bytes: await blob.arrayBuffer(),
@@ -877,7 +884,12 @@ export function PlayableNodeWorkbench({
         setPicks((current) =>
           current.map((item) =>
             playablePickKey(item) === playablePickKey(pick)
-              ? { ...item, buttonAssetId: assetId, buttonAssetScale: 100 }
+              ? {
+                  ...item,
+                  buttonAssetId: assetId,
+                  buttonAssetScaleX: 100,
+                  buttonAssetScaleY: 100,
+                }
               : item,
           ),
         );
@@ -898,24 +910,29 @@ export function PlayableNodeWorkbench({
   );
 
   const previewButtonAssetScale = useCallback(
-    (pick: PlayablePickResult, scale: number) => {
+    (pick: PlayablePickResult, scaleX: number, scaleY: number) => {
       if (!pick.source) return;
       setMediaCommand({
         command: "button-asset-scale",
         nodeId: pick.nodeId,
         cssPath: pick.cssPath,
         source: pick.source,
-        scale,
+        scaleX,
+        scaleY,
       });
     },
     [],
   );
 
   const commitButtonAssetScale = useCallback(
-    async (pick: PlayablePickResult, scale: number): Promise<boolean> => {
+    async (
+      pick: PlayablePickResult,
+      scaleX: number,
+      scaleY: number,
+    ): Promise<boolean> => {
       const releaseRefreshSkip = reserveRuntimeRefreshSkip();
       try {
-        if (!(await onWriteButtonAssetScale(pick, scale))) {
+        if (!(await onWriteButtonAssetScale(pick, scaleX, scaleY))) {
           releaseRefreshSkip();
           showToast({
             tone: "error",
@@ -926,7 +943,11 @@ export function PlayableNodeWorkbench({
         setPicks((current) =>
           current.map((item) =>
             playablePickKey(item) === playablePickKey(pick)
-              ? { ...item, buttonAssetScale: scale }
+              ? {
+                  ...item,
+                  buttonAssetScaleX: scaleX,
+                  buttonAssetScaleY: scaleY,
+                }
               : item,
           ),
         );
@@ -1536,11 +1557,13 @@ export function PreviewToolbar({
   onRemoveMotion: () => Promise<void>;
   onPreviewButtonAssetScale?: (
     pick: PlayablePickResult,
-    scale: number,
+    scaleX: number,
+    scaleY: number,
   ) => void;
   onCommitButtonAssetScale?: (
     pick: PlayablePickResult,
-    scale: number,
+    scaleX: number,
+    scaleY: number,
   ) => Promise<boolean>;
   onTool: (tool: PreviewTool) => void;
   onUndoStroke: () => void;
@@ -1549,39 +1572,127 @@ export function PreviewToolbar({
   media?: ReactNode;
 }) {
   const [motionOpen, setMotionOpen] = useState(false);
+  const [assetScaleOpen, setAssetScaleOpen] = useState(false);
+  const [assetScaleLinked, setAssetScaleLinked] = useState(true);
+  const assetScaleButton = useRef<HTMLButtonElement>(null);
+  const assetScaleMenu = useRef<HTMLDivElement>(null);
+  useDismiss(assetScaleOpen, [assetScaleButton, assetScaleMenu], () =>
+    setAssetScaleOpen(false),
+  );
   const selectedButtonAsset = motionSelection?.buttonAssetId
     ? motionSelection
     : undefined;
-  const savedAssetScale = selectedButtonAsset?.buttonAssetScale ?? 100;
+  const savedAssetScaleX = selectedButtonAsset?.buttonAssetScaleX ?? 100;
+  const savedAssetScaleY = selectedButtonAsset?.buttonAssetScaleY ?? 100;
   const assetSelectionKey = selectedButtonAsset
     ? playablePickKey(selectedButtonAsset)
     : "";
-  const [assetScaleDraft, setAssetScaleDraft] = useState(savedAssetScale);
-  const assetScaleCommitted = useRef({
-    selectionKey: assetSelectionKey,
-    scale: savedAssetScale,
-  });
+  const [assetScaleXDraft, setAssetScaleXDraft] = useState(savedAssetScaleX);
+  const [assetScaleYDraft, setAssetScaleYDraft] = useState(savedAssetScaleY);
+  const assetScaleCommitted = useRef({ x: savedAssetScaleX, y: savedAssetScaleY });
   useEffect(() => {
-    setAssetScaleDraft(savedAssetScale);
-    assetScaleCommitted.current = {
-      selectionKey: assetSelectionKey,
-      scale: savedAssetScale,
-    };
-  }, [assetSelectionKey, savedAssetScale]);
-  const commitAssetScaleDraft = async (scale = assetScaleDraft) => {
+    setAssetScaleXDraft(savedAssetScaleX);
+    setAssetScaleYDraft(savedAssetScaleY);
+    setAssetScaleLinked(savedAssetScaleX === savedAssetScaleY);
+    assetScaleCommitted.current = { x: savedAssetScaleX, y: savedAssetScaleY };
+  }, [assetSelectionKey, savedAssetScaleX, savedAssetScaleY]);
+  useEffect(() => {
+    setAssetScaleOpen(false);
+  }, [assetSelectionKey]);
+  const commitAssetScaleDraft = async (
+    scaleX = assetScaleXDraft,
+    scaleY = assetScaleYDraft,
+  ) => {
     if (
       !selectedButtonAsset ||
-      scale === assetScaleCommitted.current.scale ||
+      (scaleX === assetScaleCommitted.current.x &&
+        scaleY === assetScaleCommitted.current.y) ||
       !onCommitButtonAssetScale
     )
       return;
-    assetScaleCommitted.current = { selectionKey: assetSelectionKey, scale };
-    if (!(await onCommitButtonAssetScale(selectedButtonAsset, scale))) {
-      assetScaleCommitted.current.scale = savedAssetScale;
-      setAssetScaleDraft(savedAssetScale);
-      onPreviewButtonAssetScale?.(selectedButtonAsset, savedAssetScale);
+    assetScaleCommitted.current = { x: scaleX, y: scaleY };
+    if (
+      !(await onCommitButtonAssetScale(selectedButtonAsset, scaleX, scaleY))
+    ) {
+      assetScaleCommitted.current = {
+        x: savedAssetScaleX,
+        y: savedAssetScaleY,
+      };
+      setAssetScaleXDraft(savedAssetScaleX);
+      setAssetScaleYDraft(savedAssetScaleY);
+      setAssetScaleLinked(savedAssetScaleX === savedAssetScaleY);
+      onPreviewButtonAssetScale?.(
+        selectedButtonAsset,
+        savedAssetScaleX,
+        savedAssetScaleY,
+      );
     }
   };
+  const previewAssetScale = (axis: "x" | "y", scale: number) => {
+    if (!selectedButtonAsset) return;
+    const scaleX = assetScaleLinked || axis === "x" ? scale : assetScaleXDraft;
+    const scaleY = assetScaleLinked || axis === "y" ? scale : assetScaleYDraft;
+    setAssetScaleXDraft(scaleX);
+    setAssetScaleYDraft(scaleY);
+    onPreviewButtonAssetScale?.(selectedButtonAsset, scaleX, scaleY);
+  };
+  const setAssetScaleMode = (linked: boolean) => {
+    setAssetScaleLinked(linked);
+    if (
+      linked &&
+      selectedButtonAsset &&
+      assetScaleXDraft !== assetScaleYDraft
+    ) {
+      setAssetScaleYDraft(assetScaleXDraft);
+      onPreviewButtonAssetScale?.(
+        selectedButtonAsset,
+        assetScaleXDraft,
+        assetScaleXDraft,
+      );
+      void commitAssetScaleDraft(assetScaleXDraft, assetScaleXDraft);
+    }
+  };
+  const resetAssetScale = () => {
+    if (!selectedButtonAsset) return;
+    setAssetScaleXDraft(100);
+    setAssetScaleYDraft(100);
+    onPreviewButtonAssetScale?.(selectedButtonAsset, 100, 100);
+    void commitAssetScaleDraft(100, 100);
+  };
+  const renderAssetScaleSlider = (
+    axis: "x" | "y",
+    label: string,
+    value: number,
+  ) => (
+    <label className="playable-preview-asset-scale-row">
+      <span>{label}</span>
+      <input
+        type="range"
+        min={PLAYABLE_BUTTON_ASSET_SCALE_MIN}
+        max={PLAYABLE_BUTTON_ASSET_SCALE_MAX}
+        step="1"
+        value={value}
+        aria-label={`${label}缩放`}
+        aria-valuetext={`${value}%`}
+        onChange={(event) => previewAssetScale(axis, Number(event.target.value))}
+        onPointerUp={() =>
+          void commitAssetScaleDraft(assetScaleXDraft, assetScaleYDraft)
+        }
+        onKeyUp={(event) => {
+          if (
+            event.key.startsWith("Arrow") ||
+            event.key === "Home" ||
+            event.key === "End"
+          )
+            void commitAssetScaleDraft(assetScaleXDraft, assetScaleYDraft);
+        }}
+        onBlur={() =>
+          void commitAssetScaleDraft(assetScaleXDraft, assetScaleYDraft)
+        }
+      />
+      <output>{value}%</output>
+    </label>
+  );
   const fontFamilies =
     textSelection?.fontFamily && !fonts.includes(textSelection.fontFamily)
       ? [textSelection.fontFamily, ...fonts]
@@ -1716,51 +1827,89 @@ export function PreviewToolbar({
               className="playable-preview-toolbar-divider"
               aria-hidden="true"
             />
-            <div
-              className="playable-preview-asset-scale-control"
-              role="group"
-              aria-label="按钮背景图大小"
-            >
-              <span>背景图</span>
-              <input
-                type="range"
-                min="50"
-                max="200"
-                step="1"
-                value={assetScaleDraft}
-                aria-label="按钮背景图大小"
-                aria-valuetext={`${assetScaleDraft}%`}
-                onChange={(event) => {
-                  const scale = Number(event.target.value);
-                  setAssetScaleDraft(scale);
-                  onPreviewButtonAssetScale?.(selectedButtonAsset, scale);
-                }}
-                onPointerUp={() => void commitAssetScaleDraft()}
-                onKeyUp={(event) => {
-                  if (
-                    event.key.startsWith("Arrow") ||
-                    event.key === "Home" ||
-                    event.key === "End"
-                  )
-                    void commitAssetScaleDraft();
-                }}
-                onBlur={() => void commitAssetScaleDraft()}
-              />
-              <output>{assetScaleDraft}%</output>
+            <span className="playable-preview-asset-scale">
               <button
+                ref={assetScaleButton}
                 type="button"
-                title="重置按钮背景图大小"
-                aria-label="重置按钮背景图大小"
-                disabled={assetScaleDraft === 100}
-                onClick={() => {
-                  setAssetScaleDraft(100);
-                  onPreviewButtonAssetScale?.(selectedButtonAsset, 100);
-                  void commitAssetScaleDraft(100);
-                }}
+                className={assetScaleOpen ? "is-active" : undefined}
+                title="调整按钮背景图大小"
+                aria-label="调整按钮背景图大小"
+                aria-haspopup="dialog"
+                aria-expanded={assetScaleOpen}
+                onClick={() => setAssetScaleOpen((open) => !open)}
               >
-                <RotateCcw size={12} />
+                <SlidersHorizontal size={14} />
+                <span>背景图</span>
               </button>
-            </div>
+              {assetScaleOpen ? (
+                <div
+                  ref={assetScaleMenu}
+                  className="playable-preview-popover is-asset-scale"
+                  role="dialog"
+                  aria-label="按钮背景图大小"
+                >
+                  <header>
+                    <span>背景图大小</span>
+                    <button
+                      type="button"
+                      title="重置大小"
+                      aria-label="重置按钮背景图大小"
+                      disabled={
+                        assetScaleXDraft === 100 && assetScaleYDraft === 100
+                      }
+                      onClick={resetAssetScale}
+                    >
+                      <RotateCcw size={13} />
+                    </button>
+                  </header>
+                  <div
+                    className="playable-preview-asset-scale-modes"
+                    role="group"
+                    aria-label="缩放方式"
+                  >
+                    <button
+                      type="button"
+                      aria-label="等比缩放"
+                      aria-pressed={assetScaleLinked}
+                      className={assetScaleLinked ? "is-active" : undefined}
+                      onClick={() => setAssetScaleMode(true)}
+                    >
+                      等比
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="独立缩放"
+                      aria-pressed={!assetScaleLinked}
+                      className={!assetScaleLinked ? "is-active" : undefined}
+                      onClick={() => setAssetScaleMode(false)}
+                    >
+                      独立
+                    </button>
+                  </div>
+                  {assetScaleLinked
+                    ? renderAssetScaleSlider(
+                        "x",
+                        "整体大小",
+                        assetScaleXDraft,
+                      )
+                    : (
+                        <>
+                          {renderAssetScaleSlider(
+                            "x",
+                            "宽度",
+                            assetScaleXDraft,
+                          )}
+                          {renderAssetScaleSlider(
+                            "y",
+                            "高度",
+                            assetScaleYDraft,
+                          )}
+                        </>
+                      )}
+                  <small>可调范围：{PLAYABLE_BUTTON_ASSET_SCALE_MIN}%–{PLAYABLE_BUTTON_ASSET_SCALE_MAX}%</small>
+                </div>
+              ) : null}
+            </span>
           </>
         ) : null}
         {tool === "text" && textSelection ? (

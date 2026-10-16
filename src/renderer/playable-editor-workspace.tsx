@@ -59,6 +59,8 @@ import {
 } from "../shared/playable-move.js";
 import {
   insertPlayableMotion,
+  PLAYABLE_BUTTON_ASSET_SCALE_MAX,
+  PLAYABLE_BUTTON_ASSET_SCALE_MIN,
   PLAYABLE_MOTION_ATTRIBUTES,
   setPlayableElementAttributes,
   type PlayableMotionConfig,
@@ -1443,7 +1445,8 @@ export function PlayableEditorWorkspace({
 
   async function writeButtonAssetScale(
     pick: PlayablePickResult,
-    scale: number,
+    scaleX: number,
+    scaleY: number,
   ): Promise<boolean> {
     const graph = codebase?.graph;
     const location = pick.source
@@ -1457,9 +1460,12 @@ export function PlayableEditorWorkspace({
       node.source.html !== location.file ||
       pick.tag !== "button" ||
       !pick.buttonAssetId ||
-      !Number.isInteger(scale) ||
-      scale < 50 ||
-      scale > 200
+      !Number.isInteger(scaleX) ||
+      !Number.isInteger(scaleY) ||
+      scaleX < PLAYABLE_BUTTON_ASSET_SCALE_MIN ||
+      scaleX > PLAYABLE_BUTTON_ASSET_SCALE_MAX ||
+      scaleY < PLAYABLE_BUTTON_ASSET_SCALE_MIN ||
+      scaleY > PLAYABLE_BUTTON_ASSET_SCALE_MAX
     )
       return false;
     const file = await getWorkspaceFile(projectId, location.file);
@@ -1467,7 +1473,11 @@ export function PlayableEditorWorkspace({
     if (before === undefined) return false;
     const html = setPlayableElementAttributes(before, location, pick.tag, {
       [PLAYABLE_MOTION_ATTRIBUTES.assetScale]:
-        scale === 100 ? undefined : String(scale),
+        scaleX === scaleY && scaleX !== 100 ? String(scaleX) : undefined,
+      [PLAYABLE_MOTION_ATTRIBUTES.assetScaleX]:
+        scaleX === scaleY ? undefined : String(scaleX),
+      [PLAYABLE_MOTION_ATTRIBUTES.assetScaleY]:
+        scaleX === scaleY ? undefined : String(scaleY),
     });
     if (html === undefined) return false;
     if (html !== before)
@@ -1527,6 +1537,8 @@ export function PlayableEditorWorkspace({
     const html = setPlayableElementAttributes(before, location, pick.tag, {
       [PLAYABLE_MOTION_ATTRIBUTES.asset]: withAsset.assetId,
       [PLAYABLE_MOTION_ATTRIBUTES.assetScale]: undefined,
+      [PLAYABLE_MOTION_ATTRIBUTES.assetScaleX]: undefined,
+      [PLAYABLE_MOTION_ATTRIBUTES.assetScaleY]: undefined,
     });
     if (html === undefined) return undefined;
     await writeSources(

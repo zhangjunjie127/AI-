@@ -260,7 +260,8 @@ it("previews and commits replacement-button image scaling", async () => {
     tag: "button",
     text: "Continue",
     buttonAssetId: "button-image",
-    buttonAssetScale: 100,
+    buttonAssetScaleX: 100,
+    buttonAssetScaleY: 100,
     box: { x: 0, y: 0, width: 180, height: 48 },
   };
   const onPreviewButtonAssetScale = vi.fn();
@@ -291,28 +292,45 @@ it("previews and commits replacement-button image scaling", async () => {
     ),
   );
 
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>(
+        '[aria-label="调整按钮背景图大小"]',
+      )!
+      .click(),
+  );
+  expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('[aria-label="独立缩放"]')!.click(),
+  );
   const slider = container.querySelector<HTMLInputElement>(
-    '.playable-preview-asset-scale-control input[type="range"]',
+    '[aria-label="宽度缩放"]',
   )!;
   expect(container.querySelector("output")?.textContent).toBe("100%");
-  expect(slider.min).toBe("50");
-  expect(slider.max).toBe("200");
+  expect(slider.min).toBe("10");
+  expect(slider.max).toBe("500");
   expect(slider.step).toBe("1");
 
   await act(async () => {
     Object.defineProperty(slider, "value", {
       configurable: true,
-      get: () => "135",
+      get: () => "345",
     });
     slider.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  expect(container.querySelector("output")?.textContent).toBe("135%");
-  expect(onPreviewButtonAssetScale).toHaveBeenCalledWith(pick, 135);
+  expect(slider.parentElement?.querySelector("output")?.textContent).toBe("345%");
+  expect(onPreviewButtonAssetScale).toHaveBeenCalledWith(pick, 345, 100);
 
   await act(async () =>
     slider.dispatchEvent(new PointerEvent("pointerup", { bubbles: true })),
   );
-  expect(onCommitButtonAssetScale).toHaveBeenCalledWith(pick, 135);
+  expect(onCommitButtonAssetScale).toHaveBeenCalledWith(pick, 345, 100);
+
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('[aria-label="等比缩放"]')!.click(),
+  );
+  expect(onPreviewButtonAssetScale).toHaveBeenLastCalledWith(pick, 345, 345);
+  expect(onCommitButtonAssetScale).toHaveBeenLastCalledWith(pick, 345, 345);
 
   await act(async () =>
     container
@@ -321,6 +339,6 @@ it("previews and commits replacement-button image scaling", async () => {
       )!
       .click(),
   );
-  expect(onPreviewButtonAssetScale).toHaveBeenLastCalledWith(pick, 100);
-  expect(onCommitButtonAssetScale).toHaveBeenLastCalledWith(pick, 100);
+  expect(onPreviewButtonAssetScale).toHaveBeenLastCalledWith(pick, 100, 100);
+  expect(onCommitButtonAssetScale).toHaveBeenLastCalledWith(pick, 100, 100);
 });

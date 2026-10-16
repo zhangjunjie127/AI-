@@ -145,10 +145,14 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         );
         if (!image) return;
         element.setAttribute(
-          "data-putenggame-button-asset-scale",
-          String(command.scale),
+          PLAYABLE_MOTION_ATTRIBUTES.assetScaleX,
+          String(command.scaleX),
         );
-        image.style.transform = `scale(${command.scale / 100})`;
+        element.setAttribute(
+          PLAYABLE_MOTION_ATTRIBUTES.assetScaleY,
+          String(command.scaleY),
+        );
+        image.style.transform = `scale(${command.scaleX / 100}, ${command.scaleY / 100})`;
       } catch {
         return;
       }
@@ -1385,10 +1389,14 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       [PLAYABLE_MOTION_ATTRIBUTES.signal]: command.config?.signal,
       [PLAYABLE_MOTION_ATTRIBUTES.timeoutSignal]: command.config?.timeoutSignal,
       [PLAYABLE_MOTION_ATTRIBUTES.asset]: command.assetId,
-      [PLAYABLE_MOTION_ATTRIBUTES.assetScale]:
-        command.assetScale === undefined
+      [PLAYABLE_MOTION_ATTRIBUTES.assetScaleX]:
+        command.assetScaleX === undefined
           ? undefined
-          : String(command.assetScale),
+          : String(command.assetScaleX),
+      [PLAYABLE_MOTION_ATTRIBUTES.assetScaleY]:
+        command.assetScaleY === undefined
+          ? undefined
+          : String(command.assetScaleY),
     }))
       if (value === undefined) element.removeAttribute(name);
       else element.setAttribute(name, value);

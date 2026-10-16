@@ -35,7 +35,12 @@ export const PLAYABLE_MOTION_ATTRIBUTES = {
   timeoutSignal: "data-putenggame-motion-timeout",
   asset: "data-putenggame-button-asset",
   assetScale: "data-putenggame-button-asset-scale",
+  assetScaleX: "data-putenggame-button-asset-scale-x",
+  assetScaleY: "data-putenggame-button-asset-scale-y",
 } as const;
+
+export const PLAYABLE_BUTTON_ASSET_SCALE_MIN = 10;
+export const PLAYABLE_BUTTON_ASSET_SCALE_MAX = 500;
 
 const MOTION_KINDS = new Set<PlayableMotionKind>([
   "countdown",
@@ -81,9 +86,31 @@ export function parsePlayableMotionConfig(
 
 export function playableButtonAssetScale(value: string | null): number {
   const scale = value === null ? 100 : Number(value);
-  return Number.isFinite(scale) && scale >= 50 && scale <= 200
+  return Number.isFinite(scale) &&
+    scale >= PLAYABLE_BUTTON_ASSET_SCALE_MIN &&
+    scale <= PLAYABLE_BUTTON_ASSET_SCALE_MAX
     ? Math.round(scale)
     : 100;
+}
+
+export function playableButtonAssetScales(
+  element: Pick<HTMLElement, "getAttribute">,
+): { x: number; y: number } {
+  const legacy = element.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.assetScale);
+  return {
+    x:
+      element.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.assetScaleX) === null
+        ? playableButtonAssetScale(legacy)
+        : playableButtonAssetScale(
+            element.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.assetScaleX),
+          ),
+    y:
+      element.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.assetScaleY) === null
+        ? playableButtonAssetScale(legacy)
+        : playableButtonAssetScale(
+            element.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.assetScaleY),
+          ),
+  };
 }
 
 export function setPlayableElementAttributes(
@@ -209,13 +236,14 @@ function mountPlayableButtonAsset(
   image.src = assetUrl;
   image.alt = "";
   image.draggable = false;
+  const { x, y } = playableButtonAssetScales(element);
   Object.assign(image.style, {
     display: "block",
     width: "100%",
     height: "100%",
     objectFit: "contain",
     transformOrigin: "center",
-    transform: `scale(${playableButtonAssetScale(element.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.assetScale)) / 100})`,
+    transform: `scale(${x / 100}, ${y / 100})`,
   });
   layer.append(image);
   element.prepend(layer);

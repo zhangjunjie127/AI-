@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import {
   insertPlayableMotion,
   mountPlayableMotionElement,
+  playableButtonAssetScales,
   setPlayableElementAttributes,
 } from "../src/shared/playable-motion.js";
 
@@ -72,7 +73,8 @@ it("scales only the replacement image while keeping the button hit area intact",
   button.style.position = "absolute";
   button.style.isolation = "auto";
   button.setAttribute("data-putenggame-button-asset", "replacement");
-  button.setAttribute("data-putenggame-button-asset-scale", "150");
+  button.setAttribute("data-putenggame-button-asset-scale-x", "150");
+  button.setAttribute("data-putenggame-button-asset-scale-y", "80");
 
   const cleanup = mountPlayableMotionElement(button, {
     root: document.createElement("div").attachShadow({ mode: "open" }),
@@ -93,7 +95,7 @@ it("scales only the replacement image while keeping the button hit area intact",
   )!;
   expect(image.src).toContain("/assets/replacement.png");
   expect(image.style.objectFit).toBe("contain");
-  expect(image.style.transform).toBe("scale(1.5)");
+  expect(image.style.transform).toBe("scale(1.5, 0.8)");
   expect(button.style.backgroundImage).toBe("none");
   expect(button.style.isolation).toBe("isolate");
   expect(button.style.width).toBe("180px");
@@ -104,6 +106,15 @@ it("scales only the replacement image while keeping the button hit area intact",
   expect(button.style.backgroundImage).toContain("original.png");
   expect(button.style.isolation).toBe("auto");
   expect(button.style.position).toBe("absolute");
+});
+
+it("uses the previous single scale value for scenes without axis-specific scales", () => {
+  const button = document.createElement("button");
+  button.setAttribute("data-putenggame-button-asset-scale", "175");
+  expect(playableButtonAssetScales(button)).toEqual({ x: 175, y: 175 });
+
+  button.setAttribute("data-putenggame-button-asset-scale-x", "240");
+  expect(playableButtonAssetScales(button)).toEqual({ x: 240, y: 175 });
 });
 
 it("routes a completed hold to success and an untouched charge to timeout", () => {

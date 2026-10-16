@@ -16684,33 +16684,86 @@ button {
   font: inherit;
   font-size: 10px;
 }
-.playable-preview-asset-scale-control {
+.playable-preview-asset-scale {
+  position: relative;
   display: inline-flex;
-  height: 30px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 5px;
-  color: var(--text-muted);
-  font-size: 10px;
-  white-space: nowrap;
 }
-.playable-preview-asset-scale-control input[type="range"] {
-  width: 96px;
-  height: 16px;
+.playable-preview-popover.is-asset-scale {
+  bottom: calc(100% + 8px);
+  left: 50%;
+  width: min(300px, calc(100vw - 24px));
+  gap: 10px;
+  overflow: visible;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  color: var(--text);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 22%);
+  box-sizing: border-box;
+  transform: translateX(-50%);
+}
+.playable-preview-popover.is-asset-scale > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.playable-preview-toolbar
+  .playable-preview-popover.is-asset-scale
+  > header
+  button {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+}
+.playable-preview-asset-scale-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 5px;
+  background: var(--control-surface);
+}
+.playable-preview-toolbar .playable-preview-asset-scale-modes button {
+  height: 27px;
+  justify-content: center;
+  padding: 0 8px;
+}
+.playable-preview-toolbar
+  .playable-preview-asset-scale-modes
+  button[aria-pressed="true"] {
+  background: var(--control-selected);
+  color: var(--text);
+}
+.playable-preview-asset-scale-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.playable-preview-asset-scale-row input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  height: 18px;
   margin: 0;
   accent-color: #858b95;
   cursor: pointer;
 }
-.playable-preview-asset-scale-control output {
-  width: 34px;
+.playable-preview-asset-scale-row output {
   color: var(--text);
+  font-size: 11px;
   text-align: right;
 }
-.playable-preview-toolbar .playable-preview-asset-scale-control button {
-  width: 24px;
-  height: 24px;
-  justify-content: center;
-  padding: 0;
+.playable-preview-popover.is-asset-scale > small {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: right;
 }
 .playable-preview-toolbar-divider {
   width: 1px;
