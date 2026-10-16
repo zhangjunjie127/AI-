@@ -53,6 +53,7 @@ import type {
   PlayableTextCreate,
   PlayableTextEdit,
   PlayableTextSelection,
+  PlayableTextStyleCommand,
   PlayableTextStyleEdit,
   PlayableTransformEdit,
 } from "../shared/playable-player-protocol.js";
@@ -332,6 +333,9 @@ export function PlayableNodeWorkbench({
   const appearanceTimingSequence = useRef(0);
   const [motionCommand, setMotionCommand] = useState<PlayableMotionCommand>();
   const motionSequence = useRef(0);
+  const [textStyleCommand, setTextStyleCommand] =
+    useState<PlayableTextStyleCommand>();
+  const textStyleSequence = useRef(0);
   const [snapshot, setSnapshot] = useState<NodeRuntimeSnapshot>();
   const [diagnostics, setDiagnostics] = useState<
     { message: string; at: string }[]
@@ -475,35 +479,37 @@ export function PlayableNodeWorkbench({
   const onTextEdit = useCallback(
     (edit: PlayableTextEdit) => {
       if (edit.before === edit.after) return;
+      if (!edit.inPlace) return;
       void (async () => {
-        if (edit.inPlace) {
-          const releaseRefreshSkip = reserveRuntimeRefreshSkip();
-          try {
-            if (await onWriteText(edit)) {
-              return;
-            }
-            releaseRefreshSkip();
-          } catch (cause) {
-            releaseRefreshSkip();
-            return showToast({
-              tone: "error",
-              text: `Could not change the text: ${errorMessage(cause)}`,
-            });
+        const releaseRefreshSkip = reserveRuntimeRefreshSkip();
+        try {
+          if (await onWriteText(edit)) {
+            return;
           }
+          releaseRefreshSkip();
+          await askAgent(
+            playableTextEditRequest(edit.before, edit.after),
+            [playableElementContext(edit.pick)],
+            `Changing "${edit.before}" to "${edit.after}"`,
+          );
+        } catch (cause) {
+          releaseRefreshSkip();
+          return showToast({
+            tone: "error",
+            text: `Could not change the text: ${errorMessage(cause)}`,
+          });
         }
-        await askAgent(
-          playableTextEditRequest(edit.before, edit.after),
-          [playableElementContext(edit.pick)],
-          `Changing "${edit.before}" to "${edit.after}"`,
-        );
       })();
     },
     [askAgent, onWriteText, reserveRuntimeRefreshSkip, showToast],
   );
 
-  const onTextSelect = useCallback((selection: PlayableTextSelection) => {
-    setTextSelection(selection);
-  }, []);
+  const onTextSelect = useCallback(
+    (selection: PlayableTextSelection | undefined) => {
+      setTextSelection(selection);
+    },
+    [],
+  );
 
   const onPasteElements = useCallback(
     async (copies: PlayableElementCopy[]) => {
@@ -598,6 +604,12 @@ export function PlayableNodeWorkbench({
               ? { ...current, [property]: value }
               : current,
           );
+          setTextStyleCommand({
+            sequence: ++textStyleSequence.current,
+            pick: selection.pick,
+            property,
+            value,
+          });
         } catch (cause) {
           releaseRefreshSkip();
           showToast({
@@ -1243,6 +1255,7 @@ export function PlayableNodeWorkbench({
           deleteCommand={deleteCommand}
           appearanceTimingCommand={appearanceTimingCommand}
           motionCommand={motionCommand}
+          textStyleCommand={textStyleCommand}
           onAppearanceTimingCommandApplied={(sequence) =>
             setAppearanceTimingCommand((current) =>
               current?.sequence === sequence ? undefined : current,

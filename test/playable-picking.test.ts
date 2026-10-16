@@ -267,6 +267,12 @@ describe("pick protocol messages", () => {
 
   it("accepts pick messages in both directions", () => {
     expect(
+      isPlayableFrameMessage({
+        kind: "putenggame:playable:text-selected",
+        instanceId: "a",
+      }),
+    ).toBe(true);
+    expect(
       isPlayableHostMessage({
         kind: "putenggame:playable:pick-start",
         instanceId: "a",
@@ -362,6 +368,23 @@ describe("pick protocol messages", () => {
         instanceId: "a",
       }),
     ).toBe(false);
+    expect(
+      isPlayableHostMessage({
+        kind: "putenggame:playable:text-style",
+        instanceId: "a",
+        command: {
+          sequence: 1,
+          pick: {
+            nodeId: "menu",
+            cssPath: "p#caption",
+            tag: "p",
+            source: "nodes/menu/index.html:1:1",
+          },
+          property: "fontSize",
+          value: "24px",
+        },
+      }),
+    ).toBe(true);
     expect(
       isPlayableFrameMessage({
         kind: "putenggame:playable:seen",
@@ -699,6 +722,132 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
     expect(input.getAttribute("data-putenggame-source")).toBe(
       "nodes/choice/index.html:1:82",
     );
+    host.destroy();
+    window.close();
+  });
+
+  it("keeps confirmed text and its selection until another preview target is clicked", async () => {
+    const window = new Window();
+    Object.defineProperty(window, "top", { value: {} });
+    Object.defineProperty(window, "origin", { value: "null" });
+    Object.assign(globalThis, {
+      MutationObserver: window.MutationObserver,
+      HTMLElement: window.HTMLElement,
+      Element: window.Element,
+      ShadowRoot: window.ShadowRoot,
+      Event: window.Event,
+      getComputedStyle: window.getComputedStyle.bind(window),
+    });
+    const document = window.document as unknown as Document;
+    const host = new DocumentPlayableSurfaceHost(document, async () => ({
+      mount: async () => undefined,
+    }));
+    await host.mountNode(
+      {
+        id: "choice",
+        html: '<main data-putenggame-source="nodes/choice/index.html:1:1"><p id="dynamic">Original</p><p id="styled" data-putenggame-source="nodes/choice/index.html:1:38">Styled</p></main>',
+        css: "",
+        javascript: "",
+        inputs: [],
+      },
+      {} as never,
+    );
+    const root = document.querySelector<HTMLElement>(
+      '[data-playable-sandbox="true"]',
+    )!;
+    const surface = document.querySelector<HTMLElement>(
+      '[data-playable-surface="choice"]',
+    )!;
+    const main = surface.shadowRoot!.querySelector<HTMLElement>("main")!;
+    const text = main.querySelector<HTMLElement>("#dynamic")!;
+    Object.defineProperty(root, "getBoundingClientRect", {
+      value: () => ({ x: 0, y: 0, width: 640, height: 360 }),
+    });
+    Object.defineProperty(surface, "getBoundingClientRect", {
+      value: () => ({
+        x: 0,
+        y: 0,
+        width: 640,
+        height: 360,
+        left: 0,
+        top: 0,
+      }),
+    });
+    const onTextSelect = vi.fn();
+    const onTextEdit = vi.fn();
+    host.startPicking("text", {
+      onPick: () => undefined,
+      onTextSelect,
+      onInteractionSelect: () => undefined,
+      onTextEdit,
+      onTextCreate: () => undefined,
+      onMove: () => undefined,
+      onTransform: () => undefined,
+      onDelete: () => undefined,
+      onPasteElements: async () => undefined,
+      onCancel: () => undefined,
+    });
+
+    text.dispatchEvent(new Event("click", { bubbles: true, composed: true }));
+    text.textContent = "Edited";
+    text.dispatchEvent(new Event("blur"));
+
+    expect(onTextEdit).toHaveBeenCalledWith(
+      expect.objectContaining({ before: "Original", after: "Edited" }),
+    );
+    expect(text.textContent).toBe("Edited");
+    expect(
+      document.querySelector<HTMLElement>('[data-playable-pick-outline="true"]')
+        ?.style.display,
+    ).toBe("block");
+
+    surface.dispatchEvent(
+      new Event("click", { bubbles: true, composed: true }),
+    );
+    expect(onTextSelect).toHaveBeenLastCalledWith(undefined);
+    expect(
+      document.querySelector<HTMLElement>('[data-playable-pick-outline="true"]')
+        ?.style.display,
+    ).toBe("none");
+    const styled = main.querySelector<HTMLElement>("#styled")!;
+    const stylePick = {
+      nodeId: "choice",
+      source: "nodes/choice/index.html:1:38",
+      cssPath: "p#styled",
+      tag: "p",
+      text: "Styled",
+      box: { x: 0, y: 0, width: 100, height: 20 },
+    };
+    styled.dispatchEvent(
+      new Event("click", { bubbles: true, composed: true }),
+    );
+    host.updateTextStyle({
+      sequence: 1,
+      pick: stylePick,
+      property: "fontFamily",
+      value: "Arial",
+    });
+    host.updateTextStyle({
+      sequence: 2,
+      pick: stylePick,
+      property: "fontSize",
+      value: "24px",
+    });
+    expect(styled.style.fontFamily).toBe("Arial");
+    expect(styled.style.fontSize).toBe("24px");
+    expect(onTextSelect).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        pick: expect.objectContaining({
+          nodeId: "choice",
+          cssPath: "p#styled",
+          source: "nodes/choice/index.html:1:38",
+        }),
+      }),
+    );
+    expect(
+      document.querySelector<HTMLElement>('[data-playable-pick-outline="true"]')
+        ?.style.display,
+    ).toBe("block");
     host.destroy();
     window.close();
   });

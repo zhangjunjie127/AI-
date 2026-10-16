@@ -17,6 +17,7 @@ import type {
   PlayableMediaCommand,
   PlayableMediaState,
   PlayableMotionCommand,
+  PlayableTextStyleCommand,
   PlayableMove,
   PlayablePreviewOptions,
   PlayablePreviewTool,
@@ -57,7 +58,7 @@ export interface NodePlayerProps {
   onPick?: (pick: PlayablePickResult, additive: boolean) => void;
   onTextEdit?: (edit: PlayableTextEdit) => void;
   onTextCreate?: (text: PlayableTextCreate) => Promise<string | undefined>;
-  onTextSelect?: (selection: PlayableTextSelection) => void;
+  onTextSelect?: (selection: PlayableTextSelection | undefined) => void;
   onInteractionSelect?: (
     selection: PlayableInteractionSelection,
     additive: boolean,
@@ -83,6 +84,8 @@ export interface NodePlayerProps {
   onAppearanceTimingCommandApplied?: (sequence: number) => void;
   /** Applies animation and material edits without rebuilding the preview. */
   motionCommand?: PlayableMotionCommand;
+  /** Applies font edits to the live scene without rebuilding the preview. */
+  textStyleCommand?: PlayableTextStyleCommand;
   mediaCommand?: PlayableMediaCommand;
   mediaCommandSequence?: number;
   /** Called when the author leaves the tool (Escape in the frame). */
@@ -122,6 +125,7 @@ export function NodePlayer({
   appearanceTimingCommand,
   onAppearanceTimingCommandApplied,
   motionCommand,
+  textStyleCommand,
   mediaCommand,
   mediaCommandSequence,
   onPickCancel,
@@ -136,6 +140,7 @@ export function NodePlayer({
   >(undefined);
   const appliedAppearanceTimingSequence = useRef<number | undefined>(undefined);
   const appliedMotionSequence = useRef<number | undefined>(undefined);
+  const appliedTextStyleSequence = useRef<number | undefined>(undefined);
   const [scale, setScale] = useState<number>();
   // Keyed on content so callers need not memoize the preview object.
   const previewKey = JSON.stringify(preview ?? null);
@@ -403,6 +408,24 @@ export function NodePlayer({
     );
     appliedMotionSequence.current = motionCommand.sequence;
   }, [instanceId, motionCommand, ready]);
+
+  useEffect(() => {
+    if (
+      !ready ||
+      !textStyleCommand ||
+      appliedTextStyleSequence.current === textStyleCommand.sequence
+    )
+      return;
+    iframe.current?.contentWindow?.postMessage(
+      {
+        kind: "putenggame:playable:text-style",
+        instanceId,
+        command: textStyleCommand,
+      },
+      "*",
+    );
+    appliedTextStyleSequence.current = textStyleCommand.sequence;
+  }, [instanceId, ready, textStyleCommand]);
 
   const backdropEffectsKey = JSON.stringify(backdropEffects ?? null);
   useEffect(() => {

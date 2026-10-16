@@ -92,6 +92,11 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
       session.host.updateMotion(event.data.command);
     return;
   }
+  if (event.data.kind === "putenggame:playable:text-style") {
+    if (session?.instanceId === event.data.instanceId)
+      session.host.updateTextStyle(event.data.command);
+    return;
+  }
   if (event.data.kind === "putenggame:playable:backdrop-effects") {
     if (session?.instanceId === event.data.instanceId)
       session.host.setBackdropEffects(event.data.effects);
@@ -191,7 +196,7 @@ function startPicking(instanceId: string, tool: PlayablePreviewTool): void {
       post({
         kind: "putenggame:playable:text-selected",
         instanceId,
-        selection,
+        ...(selection ? { selection } : {}),
       }),
     onInteractionSelect: (selection, additive) =>
       post({

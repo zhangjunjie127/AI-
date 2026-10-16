@@ -31,6 +31,7 @@ import type {
   PlayableMotionCommand,
   PlayableMediaCommand,
   PlayableMediaState,
+  PlayableTextStyleCommand,
   PlayableTransformEdit,
 } from "./playable-player-protocol.js";
 import {
@@ -166,7 +167,7 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
     tool: PlayablePreviewTool,
     handlers: {
       onPick: (result: PlayablePickResult, additive: boolean) => void;
-      onTextSelect: (selection: PlayableTextSelection) => void;
+      onTextSelect: (selection: PlayableTextSelection | undefined) => void;
       onInteractionSelect: (
         selection: PlayableInteractionSelection,
         additive: boolean,
@@ -389,8 +390,8 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         return;
       }
       // Text the Agent will change goes back to what the source says until it does.
-      if (!changed || !inPlace) element.textContent = current.original;
-      place(undefined);
+      if (!changed) element.textContent = current.original;
+      place(commit ? selectedBox(element) : undefined);
       if (changed) handlers.onTextEdit({ pick, before, after, inPlace });
     };
     const createText = (event: Event) => {
@@ -911,7 +912,13 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         : pendingClickPath;
       pendingClickPath = undefined;
       const pick = path ? describePlayablePick(path) : undefined;
-      if (!pick) return;
+      if (!pick) {
+        if (tool === "text") {
+          handlers.onTextSelect(undefined);
+          place(undefined);
+        }
+        return;
+      }
       if (tool === "select") {
         const mouse = event as MouseEvent;
         const pointTarget = path
@@ -996,7 +1003,11 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         return;
       }
       const target = event.composedPath()[0];
-      if (!isTextTarget(target)) return;
+      if (!isTextTarget(target)) {
+        handlers.onTextSelect(undefined);
+        place(undefined);
+        return;
+      }
       const element = target as HTMLElement;
       const original = element.textContent ?? "";
       const onBlur = () => finish(true);
@@ -1207,6 +1218,29 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       }
     }
     this.#updateTimedVisibility();
+  }
+
+  updateTextStyle(command: PlayableTextStyleCommand): void {
+    const { pick, property, value } = command;
+    if (!pick.source || !value.trim()) return;
+    const surface = [...this.#nodeLayer.querySelectorAll<HTMLElement>(
+      "[data-playable-surface]",
+    )].find((candidate) => candidate.dataset.playableSurface === pick.nodeId);
+    const root = surface?.shadowRoot;
+    if (!root) return;
+    try {
+      const element = root.querySelector<HTMLElement>(pick.cssPath);
+      if (
+        !element ||
+        element.tagName.toLowerCase() !== pick.tag ||
+        element.getAttribute(PLAYABLE_SOURCE_ATTRIBUTE) !== pick.source
+      )
+        return;
+      if (property === "fontFamily") element.style.fontFamily = value;
+      else element.style.fontSize = value;
+    } catch {
+      return;
+    }
   }
 
   updateMotion(command: PlayableMotionCommand): void {

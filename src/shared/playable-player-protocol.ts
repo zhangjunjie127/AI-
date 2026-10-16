@@ -88,6 +88,11 @@ export interface PlayableTextStyleEdit {
   inPlace: boolean;
 }
 
+export interface PlayableTextStyleCommand
+  extends Omit<PlayableTextStyleEdit, "inPlace"> {
+  sequence: number;
+}
+
 /** A non-video element selected for appearance timing. */
 export interface PlayableInteractionSelection {
   pick: PlayablePickResult;
@@ -212,6 +217,11 @@ export type PlayableHostMessage =
       command: PlayableMotionCommand;
     }
   | {
+      kind: "putenggame:playable:text-style";
+      instanceId: string;
+      command: PlayableTextStyleCommand;
+    }
+  | {
       kind: "putenggame:playable:backdrop-effects";
       instanceId: string;
       effects: PlayableBackdropEffects;
@@ -290,7 +300,7 @@ export type PlayableFrameMessage =
   | {
       kind: "putenggame:playable:text-selected";
       instanceId: string;
-      selection: PlayableTextSelection;
+      selection?: PlayableTextSelection;
     }
   | {
       kind: "putenggame:playable:interaction-selected";
@@ -359,6 +369,22 @@ export function isPlayableHostMessage(
       typeof value.pick.nodeId === "string" &&
       typeof value.pick.cssPath === "string"
     );
+  if (value.kind === "putenggame:playable:text-style") {
+    const command = value.command;
+    return (
+      isRecord(command) &&
+      typeof command.sequence === "number" &&
+      Number.isSafeInteger(command.sequence) &&
+      command.sequence > 0 &&
+      isRecord(command.pick) &&
+      typeof command.pick.nodeId === "string" &&
+      typeof command.pick.cssPath === "string" &&
+      typeof command.pick.tag === "string" &&
+      typeof command.pick.source === "string" &&
+      (command.property === "fontFamily" || command.property === "fontSize") &&
+      typeof command.value === "string"
+    );
+  }
   if (value.kind === "putenggame:playable:text-created-result")
     return (
       typeof value.id === "string" &&
@@ -521,11 +547,12 @@ export function isPlayableFrameMessage(
     );
   if (value.kind === "putenggame:playable:text-selected")
     return (
-      isRecord(value.selection) &&
-      isRecord(value.selection.pick) &&
-      typeof value.selection.fontFamily === "string" &&
-      typeof value.selection.fontSize === "string" &&
-      typeof value.selection.inPlace === "boolean"
+      value.selection === undefined ||
+      (isRecord(value.selection) &&
+        isRecord(value.selection.pick) &&
+        typeof value.selection.fontFamily === "string" &&
+        typeof value.selection.fontSize === "string" &&
+        typeof value.selection.inPlace === "boolean")
     );
   if (value.kind === "putenggame:playable:interaction-selected")
     return (
