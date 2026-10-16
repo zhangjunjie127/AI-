@@ -41,10 +41,9 @@ const ENTITIES: Record<string, string> = {
 
 /**
  * Replaces the text of the element whose start tag is at `location` in
- * surface HTML. The element must hold only text, and that text must still
- * read `before`, so a stale preview or text set by a script is never
- * overwritten. Surrounding whitespace is kept. Returns undefined when the
- * edit cannot be made in place.
+ * surface HTML. `before` is the element's original direct text, not text in
+ * child elements. Nested markup is preserved, and stale or script-generated
+ * text is never overwritten.
  */
 export function replacePlayableElementText(
   html: string,
@@ -58,18 +57,71 @@ export function replacePlayableElementText(
   if (!tag) return undefined;
   const open = startTagEnd(html, start);
   if (open === undefined || html[open - 2] === "/") return undefined;
-  const close = html.indexOf("<", open);
+  const range = elementRange(html, start, tag);
+  if (!range) return undefined;
+  const close = html.lastIndexOf("<", range.end - 1);
   if (
-    close < 0 ||
-    html.slice(close, close + tag.length + 2).toLowerCase() !==
-      `</${tag.toLowerCase()}`
+    close < open ||
+    !new RegExp(`^<\\/\\s*${escapeRegExp(tag)}\\s*>$`, "i").test(
+      html.slice(close, range.end),
+    )
   )
     return undefined;
-  const content = html.slice(open, close);
-  if (normalize(decode(content)) !== normalize(before)) return undefined;
-  const leading = /^\s*/.exec(content)![0];
-  const trailing = /\s*$/.exec(content.slice(leading.length))![0];
-  return `${html.slice(0, open)}${leading}${escapeText(after.trim())}${trailing}${html.slice(close)}`;
+  const contents = directTextRanges(html, open, close);
+  const sourceText = contents
+    .map(({ start: textStart, end }) => decode(html.slice(textStart, end)))
+    .join("");
+  if (!contents.length || normalize(sourceText) !== normalize(before))
+    return undefined;
+  const first = contents[0]!;
+  const last = contents.at(-1)!;
+  const leading = /^\s*/.exec(html.slice(first.start, first.end))![0];
+  const trailing = /\s*$/.exec(html.slice(last.start, last.end))![0];
+  let next = html;
+  for (let index = contents.length - 1; index >= 0; index -= 1) {
+    const content = contents[index]!;
+    const replacement =
+      index === 0
+        ? `${leading}${escapeText(after.trim())}${trailing}`
+        : "";
+    next = `${next.slice(0, content.start)}${replacement}${next.slice(content.end)}`;
+  }
+  return next;
+}
+
+function directTextRanges(
+  html: string,
+  start: number,
+  end: number,
+): { start: number; end: number }[] {
+  const ranges: { start: number; end: number }[] = [];
+  let cursor = start;
+  let depth = 0;
+  while (cursor < end) {
+    const open = html.indexOf("<", cursor);
+    if (open < 0 || open >= end) {
+      if (depth === 0 && cursor < end) ranges.push({ start: cursor, end });
+      break;
+    }
+    if (depth === 0 && cursor < open) ranges.push({ start: cursor, end: open });
+    if (html.startsWith("<!--", open)) {
+      const commentEnd = html.indexOf("-->", open + 4);
+      if (commentEnd < 0 || commentEnd >= end) return [];
+      cursor = commentEnd + 3;
+      continue;
+    }
+    const tokenEnd = startTagEnd(html, open);
+    if (tokenEnd === undefined || tokenEnd > end) return [];
+    const token = html.slice(open, tokenEnd);
+    if (/^<\//.test(token)) {
+      depth = Math.max(0, depth - 1);
+    } else if (!/^<!/.test(token) && !/\/\s*>$/.test(token)) {
+      const name = /^<([A-Za-z][\w-]*)/.exec(token)?.[1] ?? "";
+      if (!isVoidElement(name)) depth += 1;
+    }
+    cursor = tokenEnd;
+  }
+  return ranges;
 }
 
 /** Inserts a positioned text element into the surface's first root element. */

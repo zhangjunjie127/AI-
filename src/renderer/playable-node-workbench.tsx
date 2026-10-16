@@ -479,7 +479,6 @@ export function PlayableNodeWorkbench({
   const onTextEdit = useCallback(
     (edit: PlayableTextEdit) => {
       if (edit.before === edit.after) return;
-      if (!edit.inPlace) return;
       void (async () => {
         const releaseRefreshSkip = reserveRuntimeRefreshSkip();
         try {

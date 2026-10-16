@@ -67,6 +67,19 @@ describe("replacePlayableElementText", () => {
     expect(next).toContain("<p>Tea &lt; coffee &amp; cake</p>");
   });
 
+  it("changes only direct text while preserving nested template elements", () => {
+    const source =
+      '<button>Continue <small>No save yet</small></button>';
+    expect(
+      replacePlayableElementText(
+        source,
+        { line: 1, column: 1 },
+        "Continue",
+        "Resume",
+      ),
+    ).toBe('<button>Resume <small>No save yet</small></button>');
+  });
+
   it("refuses stale text, nested elements, and a location that is not a tag", () => {
     expect(
       replacePlayableElementText(

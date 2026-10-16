@@ -34,6 +34,7 @@ import type {
   PlayableTextStyleCommand,
   PlayableTransformEdit,
 } from "./playable-player-protocol.js";
+import { playableOriginalText } from "./playable-text-source.js";
 import {
   PLAYABLE_BACKDROP_GRAIN_VARIABLE,
   PLAYABLE_BACKDROP_VIGNETTE_VARIABLE,
@@ -377,22 +378,41 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       const current = editing;
       if (!current) return;
       editing = undefined;
-      const { element, pick, before, inPlace } = current;
-      element.removeEventListener("blur", current.onBlur);
-      element.removeAttribute("contenteditable");
-      const after = (element.textContent ?? "").trim();
+      const { element, editor, pick, before, inPlace } = current;
+      editor.removeEventListener("blur", current.onBlur);
+      const after = (editor.textContent ?? "").trim();
       const changed = commit && after && after !== before.trim();
       if (current.creation) {
+        editor.removeAttribute("contenteditable");
         if (changed)
           handlers.onTextCreate({ ...current.creation, text: after });
         else element.remove();
         place(undefined);
         return;
       }
-      // Text the Agent will change goes back to what the source says until it does.
-      if (!changed) element.textContent = current.original;
+      editor.remove();
+      current.placeholders.forEach((placeholder, index) => {
+        if (changed && index === 0) {
+          placeholder.replaceWith(
+            this.#document.createTextNode(
+              `${current.leadingText}${after}${current.trailingText}`,
+            ),
+          );
+        } else if (changed) {
+          placeholder.remove();
+        } else {
+          placeholder.replaceWith(current.originalNodes[index]!);
+        }
+      });
       place(commit ? selectedBox(element) : undefined);
-      if (changed) handlers.onTextEdit({ pick, before, after, inPlace });
+      if (changed)
+        handlers.onTextEdit({
+          pick,
+          before,
+          after,
+          sourceBefore: current.sourceBefore,
+          inPlace,
+        });
     };
     const createText = (event: Event) => {
       block(event);
@@ -459,6 +479,11 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       const onBlur = () => finish(true);
       editing = {
         element,
+        editor: element,
+        placeholders: [],
+        originalNodes: [],
+        leadingText: "",
+        trailingText: "",
         pick: {
           nodeId: creation.nodeId,
           cssPath: `#${creation.id}`,
@@ -466,7 +491,6 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
           text: "",
           box: selectedBox(element),
         },
-        original: "",
         before: "",
         inPlace: false,
         creation,
@@ -1009,7 +1033,28 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         return;
       }
       const element = target as HTMLElement;
-      const original = element.textContent ?? "";
+      const originalNodes = Array.from(element.childNodes).filter(
+        (child): child is Text => child.nodeType === 3,
+      );
+      if (!originalNodes.some((node) => node.textContent?.trim())) return;
+      const original = originalNodes
+        .map((node) => node.nodeValue ?? "")
+        .join("");
+      const sourceBefore = originalNodes
+        .map((node) => playableOriginalText(node))
+        .join("");
+      const leadingText = /^\s*/.exec(original)![0];
+      const trailingText = /\s*$/.exec(original.slice(leadingText.length))![0];
+      const editor = this.#document.createElement("span");
+      editor.setAttribute("contenteditable", "plaintext-only");
+      editor.textContent = original;
+      const placeholders = originalNodes.map(() =>
+        this.#document.createComment("playable-text"),
+      );
+      originalNodes.forEach((node, index) =>
+        node.replaceWith(placeholders[index]!),
+      );
+      placeholders[0]!.parentNode?.insertBefore(editor, placeholders[0]!);
       const onBlur = () => finish(true);
       const inPlace = holdsSourceText(element);
       const computed = view.getComputedStyle(element);
@@ -1025,16 +1070,20 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       });
       editing = {
         element,
+        editor,
+        placeholders,
+        originalNodes,
         pick,
-        original,
+        leadingText,
+        trailingText,
         before: original.replace(/\s+/g, " ").trim(),
+        sourceBefore: sourceBefore.replace(/\s+/g, " ").trim(),
         inPlace,
         onBlur,
       };
-      element.setAttribute("contenteditable", "plaintext-only");
-      element.addEventListener("blur", onBlur);
-      element.focus();
-      view.getSelection()?.selectAllChildren(element);
+      editor.addEventListener("blur", onBlur);
+      editor.focus();
+      view.getSelection()?.selectAllChildren(editor);
       place(pick.box);
     };
     const key = (event: Event) => {
@@ -1592,10 +1641,14 @@ function createSandboxScaffold(document: Document): {
 
 interface TextEditing {
   element: HTMLElement;
+  editor: HTMLElement;
+  placeholders: Comment[];
+  originalNodes: Text[];
+  leadingText: string;
+  trailingText: string;
   pick: PlayablePickResult;
-  /** The text before editing, restored on Escape. */
-  original: string;
   before: string;
+  sourceBefore?: string;
   inPlace: boolean;
   creation?: Omit<PlayableTextCreate, "text">;
   onBlur: () => void;
@@ -2004,12 +2057,7 @@ function isTextTarget(target: unknown): boolean {
  * be rewritten directly.
  */
 function holdsSourceText(element: Element): boolean {
-  return (
-    element.hasAttribute(PLAYABLE_SOURCE_ATTRIBUTE) &&
-    Array.from(element.childNodes).every(
-      (child) => child.nodeType === 3 || child.nodeType === 8,
-    )
-  );
+  return element.hasAttribute(PLAYABLE_SOURCE_ATTRIBUTE);
 }
 
 function parseDelaySeconds(value: string): number {

@@ -55,9 +55,10 @@ export interface PlayableTextEdit {
   pick: PlayablePickResult;
   before: string;
   after: string;
+  /** Original, untranslated text from the source markup when available. */
+  sourceBefore?: string;
   /**
-   * The element was written in surface HTML and holds only text, so the edit
-   * can go straight back to its source. Otherwise the Agent makes it.
+   * The element was written in surface HTML and has a source location.
    */
   inPlace: boolean;
 }
@@ -527,6 +528,8 @@ export function isPlayableFrameMessage(
       isRecord(value.edit.pick) &&
       typeof value.edit.before === "string" &&
       typeof value.edit.after === "string" &&
+      (value.edit.sourceBefore === undefined ||
+        typeof value.edit.sourceBefore === "string") &&
       typeof value.edit.inPlace === "boolean"
     );
   if (value.kind === "putenggame:playable:text-created")

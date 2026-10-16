@@ -19,6 +19,7 @@ import {
   type PlayableElementCopy,
 } from "../src/shared/playable-player-protocol.js";
 import { DocumentPlayableSurfaceHost } from "../src/shared/playable-sandbox.js";
+import { translateSandboxTextNodes } from "../src/renderer/playable-sandbox-language.js";
 
 describe("annotatePlayableSourceLocations", () => {
   it("annotates start tags with one-based line and column", () => {
@@ -745,7 +746,7 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
     await host.mountNode(
       {
         id: "choice",
-        html: '<main data-putenggame-source="nodes/choice/index.html:1:1"><p id="dynamic">Original</p><p id="styled" data-putenggame-source="nodes/choice/index.html:1:38">Styled</p></main>',
+        html: '<main data-putenggame-source="nodes/choice/index.html:1:1"><p id="dynamic">Original</p><button id="styled" data-putenggame-source="nodes/choice/index.html:1:38">Styled <small>Hint</small></button></main>',
         css: "",
         javascript: "",
         inputs: [],
@@ -759,7 +760,15 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
       '[data-playable-surface="choice"]',
     )!;
     const main = surface.shadowRoot!.querySelector<HTMLElement>("main")!;
-    const text = main.querySelector<HTMLElement>("#dynamic")!;
+    const text = main.querySelector<HTMLElement>("#styled")!;
+    translateSandboxTextNodes(
+      text,
+      (value) =>
+        value.trim() === "Styled"
+          ? `已翻译文字${value.endsWith(" ") ? " " : ""}`
+          : value,
+      new WeakMap(),
+    );
     Object.defineProperty(root, "getBoundingClientRect", {
       value: () => ({ x: 0, y: 0, width: 640, height: 360 }),
     });
@@ -789,13 +798,20 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
     });
 
     text.dispatchEvent(new Event("click", { bubbles: true, composed: true }));
-    text.textContent = "Edited";
-    text.dispatchEvent(new Event("blur"));
+    const editor = text.querySelector<HTMLElement>('[contenteditable="plaintext-only"]')!;
+    editor.textContent = "Edited";
+    editor.dispatchEvent(new Event("blur"));
 
     expect(onTextEdit).toHaveBeenCalledWith(
-      expect.objectContaining({ before: "Original", after: "Edited" }),
+      expect.objectContaining({
+        before: "已翻译文字",
+        after: "Edited",
+        sourceBefore: "Styled",
+        inPlace: true,
+      }),
     );
-    expect(text.textContent).toBe("Edited");
+    expect(text.textContent).toBe("Edited Hint");
+    expect(text.querySelector("small")?.textContent).toBe("Hint");
     expect(
       document.querySelector<HTMLElement>('[data-playable-pick-outline="true"]')
         ?.style.display,
@@ -813,9 +829,9 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
     const stylePick = {
       nodeId: "choice",
       source: "nodes/choice/index.html:1:38",
-      cssPath: "p#styled",
-      tag: "p",
-      text: "Styled",
+      cssPath: "button#styled",
+      tag: "button",
+      text: "Styled Hint",
       box: { x: 0, y: 0, width: 100, height: 20 },
     };
     styled.dispatchEvent(
@@ -839,7 +855,7 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
       expect.objectContaining({
         pick: expect.objectContaining({
           nodeId: "choice",
-          cssPath: "p#styled",
+          cssPath: "button#styled",
           source: "nodes/choice/index.html:1:38",
         }),
       }),

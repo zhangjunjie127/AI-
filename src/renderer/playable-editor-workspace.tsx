@@ -1192,13 +1192,19 @@ export function PlayableEditorWorkspace({
     const html =
       before === undefined
         ? undefined
-        : replacePlayableElementText(before, location, edit.before, edit.after);
+        : replacePlayableElementText(
+            before,
+            location,
+            edit.sourceBefore ?? edit.before,
+            edit.after,
+          );
     if (before === undefined || html === undefined) return false;
     const signal = node.signals.find(
       (candidate) => candidate.id === edit.pick.signal,
     );
+    const originalText = edit.sourceBefore ?? edit.before;
     const next =
-      signal && signal.label.trim() === edit.before.trim()
+      signal && signal.label.trim() === originalText.trim()
         ? setPlayableSignalLabel(graph, node.id, signal.id, edit.after.trim())
         : graph;
     await writeSources(
