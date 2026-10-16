@@ -159,10 +159,38 @@ it("sends timing updates to the active frame without initializing it again", asy
     command,
   });
   expect(onApplied).toHaveBeenCalledWith(command.sequence);
+
+  await act(async () =>
+    root.render(
+      <NodePlayer
+        {...playerProps}
+        mediaCommand={{ command: "seek", time: 12 }}
+        mediaCommandSequence={1}
+      />,
+    ),
+  );
+  await act(async () =>
+    root.render(
+      <NodePlayer
+        {...playerProps}
+        mediaCommand={{ command: "seek", time: 12 }}
+        mediaCommandSequence={2}
+      />,
+    ),
+  );
+  expect(
+    messages.filter(
+      (message) =>
+        typeof message === "object" &&
+        message !== null &&
+        Reflect.get(message, "kind") === "putenggame:playable:media-command",
+    ),
+  ).toHaveLength(2);
 });
 
 it("forwards history shortcuts from the preview frame to the editor", async () => {
   const onHistoryCommand = vi.fn();
+  const onActivity = vi.fn();
   await act(async () =>
     root.render(
       <NodePlayer
@@ -174,6 +202,7 @@ it("forwards history shortcuts from the preview frame to the editor", async () =
         preview={preview}
         tool="select"
         onHistoryCommand={onHistoryCommand}
+        onActivity={onActivity}
       />,
     ),
   );
@@ -195,7 +224,7 @@ it("forwards history shortcuts from the preview frame to the editor", async () =
   )!;
   const instanceId = Reflect.get(init, "instanceId");
 
-  await act(async () =>
+  await act(async () => {
     window.dispatchEvent(
       new MessageEvent("message", {
         data: {
@@ -204,8 +233,17 @@ it("forwards history shortcuts from the preview frame to the editor", async () =
           command: "undo",
         },
       }),
-    ),
-  );
+    );
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: {
+          kind: "putenggame:playable:activity",
+          instanceId,
+        },
+      }),
+    );
+  });
 
   expect(onHistoryCommand).toHaveBeenCalledExactlyOnceWith("undo");
+  expect(onActivity).toHaveBeenCalledOnce();
 });

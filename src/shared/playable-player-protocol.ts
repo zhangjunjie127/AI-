@@ -330,6 +330,7 @@ export type PlayableFrameMessage =
       instanceId: string;
       state: PlayableMediaState;
     }
+  | { kind: "putenggame:playable:activity"; instanceId: string }
   | { kind: "putenggame:playable:pick-cancelled"; instanceId: string };
 
 export function isPlayableHostMessage(
@@ -621,6 +622,7 @@ export function isPlayableFrameMessage(
       Number.isFinite(value.state.duration) &&
       typeof value.state.paused === "boolean"
     );
+  if (value.kind === "putenggame:playable:activity") return true;
   if (value.kind === "putenggame:playable:pick-cancelled") return true;
   return (
     (value.kind === "putenggame:playable:error" ||

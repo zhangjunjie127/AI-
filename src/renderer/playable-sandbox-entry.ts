@@ -17,6 +17,7 @@ import { translateSandboxTextNodes } from "./playable-sandbox-language.js";
 
 let session: SandboxSession | undefined;
 let nextElementPasteRequest = 0;
+let lastActivityPointerMove = 0;
 const pendingElementPaste = new Map<
   string,
   {
@@ -24,6 +25,22 @@ const pendingElementPaste = new Map<
     reject: (error: Error) => void;
   }
 >();
+
+const reportPlayerActivity = (event: Event) => {
+  const current = session;
+  if (!current) return;
+  if (event.type === "pointermove") {
+    const now = performance.now();
+    if (now - lastActivityPointerMove < 250) return;
+    lastActivityPointerMove = now;
+  }
+  post({
+    kind: "putenggame:playable:activity",
+    instanceId: current.instanceId,
+  });
+};
+for (const type of ["pointermove", "pointerdown", "click", "keydown", "touchstart"])
+  document.addEventListener(type, reportPlayerActivity, true);
 
 window.addEventListener("message", (event: MessageEvent<unknown>) => {
   if (event.source !== window.parent || !isPlayableHostMessage(event.data))

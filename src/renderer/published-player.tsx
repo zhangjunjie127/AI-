@@ -1,9 +1,13 @@
-import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { StrictMode, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import { isCompiledNodeGraph } from "../shared/playable-compiled.js";
 import { isNodeGraph } from "../shared/playable-graph-validation.js";
 import { PlayableStateHistory, playableDebugRecord } from "../shared/playable-debug.js";
-import type { NodePlayerDefinition } from "../shared/playable-player-protocol.js";
+import type {
+  NodePlayerDefinition,
+  PlayableMediaCommand,
+  PlayableMediaState,
+} from "../shared/playable-player-protocol.js";
 import type { NodeRuntimeSnapshot } from "../shared/playable-runtime.js";
 import { isPublishedNodeManifest, PLAYTEST_SCOPE_PREFIX, type PublishedNodeManifest } from "../shared/playable-publish.js";
 import { NodePlayer } from "./playable-player.js";
@@ -69,20 +73,130 @@ function PublishedNodePlayer({ manifest }: { manifest: PublishedNodeManifest }) 
 
   const saveKey = `putenggame:playable:${manifest.scope}`;
   const [session, setSession] = useState(0);
+  const [mediaState, setMediaState] = useState<PlayableMediaState>({
+    currentTime: 0,
+    duration: 0,
+    paused: true,
+  });
+  const [mediaCommand, setMediaCommand] = useState<
+    PlayableMediaCommand | undefined
+  >(undefined);
+  const [mediaCommandSequence, setMediaCommandSequence] = useState(0);
+  const [controlsVisible, setControlsVisible] = useState(false);
+  const [scrubTime, setScrubTime] = useState<number>();
+  const hideControlsTimer = useRef<number | undefined>(undefined);
+  const scrubbing = useRef(false);
   const onSnapshot = usePlaytestBridge(manifest, state.loading || "error" in state ? undefined : state.definition, () => {
     window.localStorage.removeItem(saveKey);
     setSession((value) => value + 1);
   });
+  const hideControls = useCallback(() => {
+    if (hideControlsTimer.current !== undefined)
+      window.clearTimeout(hideControlsTimer.current);
+    hideControlsTimer.current = undefined;
+    setControlsVisible(false);
+  }, []);
+  const wakeControls = useCallback(() => {
+    if (mediaState.duration <= 0) return;
+    setControlsVisible(true);
+    if (hideControlsTimer.current !== undefined)
+      window.clearTimeout(hideControlsTimer.current);
+    hideControlsTimer.current = scrubbing.current
+      ? undefined
+      : window.setTimeout(hideControls, 3000);
+  }, [hideControls, mediaState.duration]);
+  const onMediaState = useCallback((next: PlayableMediaState) => {
+    setMediaState(next);
+    if (next.duration <= 0) {
+      scrubbing.current = false;
+      setScrubTime(undefined);
+      hideControls();
+    }
+  }, [hideControls]);
+  const onSeek = useCallback((time: number) => {
+    setScrubTime(time);
+    setMediaCommand({ command: "seek", time });
+    setMediaCommandSequence((sequence) => sequence + 1);
+    wakeControls();
+  }, [wakeControls]);
+  const endScrubbing = useCallback(() => {
+    if (!scrubbing.current) return;
+    scrubbing.current = false;
+    setScrubTime(undefined);
+    wakeControls();
+  }, [wakeControls]);
+  useEffect(() => () => {
+    if (hideControlsTimer.current !== undefined)
+      window.clearTimeout(hideControlsTimer.current);
+  }, []);
 
   if (state.loading) return <PublishedState />;
   if ("error" in state) return <PublishedState error={state.error} />;
-  return <NodePlayer
-    key={session}
-    definition={state.definition}
-    assets={state.assets}
-    saveKey={saveKey}
-    onSnapshot={onSnapshot}
-  />;
+  const duration = Math.max(0, mediaState.duration);
+  const currentTime = Math.min(
+    duration,
+    Math.max(0, scrubTime ?? mediaState.currentTime),
+  );
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+  return (
+    <div
+      className="published-player-shell"
+      onPointerMove={wakeControls}
+      onPointerDown={wakeControls}
+      onKeyDown={wakeControls}
+    >
+      <NodePlayer
+        key={session}
+        definition={state.definition}
+        assets={state.assets}
+        saveKey={saveKey}
+        onSnapshot={onSnapshot}
+        onMediaState={onMediaState}
+        onActivity={wakeControls}
+        mediaCommand={mediaCommand}
+        mediaCommandSequence={mediaCommandSequence}
+      />
+      {duration > 0 ? (
+        <div
+          className={`published-player-controls${controlsVisible ? " is-visible" : ""}`}
+          aria-label="视频进度"
+          aria-hidden={!controlsVisible}
+          onPointerUp={endScrubbing}
+          onPointerCancel={endScrubbing}
+        >
+          <span>{formatMediaTime(currentTime)}</span>
+          <input
+            type="range"
+            min="0"
+            max={duration}
+            step="0.1"
+            value={currentTime}
+            aria-label="视频进度"
+            aria-valuetext={`${formatMediaTime(currentTime)} / ${formatMediaTime(duration)}`}
+            style={{ "--player-progress": `${progress}%` } as CSSProperties}
+            onFocus={wakeControls}
+            onKeyDown={wakeControls}
+            onPointerDown={() => {
+              scrubbing.current = true;
+              setControlsVisible(true);
+              if (hideControlsTimer.current !== undefined)
+                window.clearTimeout(hideControlsTimer.current);
+              hideControlsTimer.current = undefined;
+            }}
+            onChange={(event) => onSeek(Number(event.currentTarget.value))}
+          />
+          <span>{formatMediaTime(duration)}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function formatMediaTime(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(safeSeconds / 60)
+    .toString()
+    .padStart(2, "0")}:${(safeSeconds % 60).toString().padStart(2, "0")}`;
 }
 
 /**

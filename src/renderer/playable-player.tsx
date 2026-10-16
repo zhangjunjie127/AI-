@@ -72,6 +72,7 @@ export interface NodePlayerProps {
   elementClipboardCommand?: PlayableElementClipboardCommand;
   onElementClipboardCommandApplied?: (sequence: number) => void;
   onMediaState?: (state: PlayableMediaState) => void;
+  onActivity?: () => void;
   /** Keeps the authoring preview's media position across source updates. */
   preserveMediaState?: PlayableMediaState;
   backdropEffects?: PlayableBackdropEffects;
@@ -83,6 +84,7 @@ export interface NodePlayerProps {
   /** Applies animation and material edits without rebuilding the preview. */
   motionCommand?: PlayableMotionCommand;
   mediaCommand?: PlayableMediaCommand;
+  mediaCommandSequence?: number;
   /** Called when the author leaves the tool (Escape in the frame). */
   onPickCancel?: () => void;
   onSnapshot?: (snapshot: NodeRuntimeSnapshot) => void;
@@ -113,6 +115,7 @@ export function NodePlayer({
   elementClipboardCommand,
   onElementClipboardCommandApplied,
   onMediaState,
+  onActivity,
   preserveMediaState,
   backdropEffects,
   deleteCommand,
@@ -120,6 +123,7 @@ export function NodePlayer({
   onAppearanceTimingCommandApplied,
   motionCommand,
   mediaCommand,
+  mediaCommandSequence,
   onPickCancel,
   onSnapshot,
   onDiagnostic = reportDiagnostic,
@@ -226,6 +230,8 @@ export function NodePlayer({
         onHistoryCommand?.(message.command);
       } else if (message.kind === "putenggame:playable:media-state") {
         onMediaState?.(message.state);
+      } else if (message.kind === "putenggame:playable:activity") {
+        onActivity?.();
       } else if (message.kind === "putenggame:playable:pick-cancelled") {
         onPickCancel?.();
       } else {
@@ -248,6 +254,7 @@ export function NodePlayer({
     onPasteElements,
     onHistoryCommand,
     onMediaState,
+    onActivity,
     onPickCancel,
     onSnapshot,
     saveKey,
@@ -289,7 +296,10 @@ export function NodePlayer({
     ready,
   ]);
 
-  const mediaCommandKey = JSON.stringify(mediaCommand ?? null);
+  const mediaCommandKey = JSON.stringify({
+    command: mediaCommand ?? null,
+    sequence: mediaCommandSequence,
+  });
   useEffect(() => {
     if (!ready) return;
     const restore = restoreMediaState.current;
