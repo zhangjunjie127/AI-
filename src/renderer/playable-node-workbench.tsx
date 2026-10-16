@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -25,6 +26,7 @@ import {
   Trash2,
   Type,
   Undo2,
+  WandSparkles,
   X,
   type IconComponent,
 } from "./icons.js";
@@ -45,6 +47,7 @@ import type {
   PlayableInteractionTimingEdit,
   PlayableMediaCommand,
   PlayableMediaState,
+  PlayableMotionCommand,
   PlayableMove,
   PlayablePreviewOptions,
   PlayableTextCreate,
@@ -70,7 +73,12 @@ import {
   playableRuntimeKey,
   type PlayableProjectValidationIssue,
 } from "../shared/playable-editor.js";
-import { getNodeRuntime, getWorkspaceFile, playableSandboxUrl } from "./api.js";
+import {
+  getLibraryAsset,
+  getNodeRuntime,
+  getWorkspaceFile,
+  playableSandboxUrl,
+} from "./api.js";
 import { loadLibraryAssets, type LibraryAsset } from "./library-assets.js";
 import {
   LibraryAssetPicker,
@@ -93,6 +101,10 @@ import {
   readPlayableAffectionConfig,
   type PlayableAffectionConfig,
 } from "../shared/playable-affection.js";
+import {
+  type PlayableMotionConfig,
+  type PlayableMotionKind,
+} from "../shared/playable-motion.js";
 
 const ASSET_UPLOAD_ACCEPT = ".png,.jpg,.jpeg,.webp,.mp4,.mov,.webm";
 const TOAST_LIMIT = 3;
@@ -188,6 +200,9 @@ export function PlayableNodeWorkbench({
   onElementClipboardCommandApplied,
   onWriteTextStyle,
   onWriteInteractionTimings,
+  onWriteMotion,
+  onCreateMotion,
+  onReplaceButtonAsset,
   onWriteMove,
   onWriteTransform,
   onWriteDelete,
@@ -230,6 +245,18 @@ export function PlayableNodeWorkbench({
   onWriteInteractionTimings: (
     edits: PlayableInteractionTimingEdit[],
   ) => Promise<boolean>;
+  onWriteMotion: (
+    pick: PlayablePickResult,
+    config: PlayableMotionConfig | undefined,
+    assetId?: string,
+  ) => Promise<boolean>;
+  onCreateMotion: (
+    config: PlayableMotionConfig,
+  ) => Promise<{ id: string; source: string } | undefined>;
+  onReplaceButtonAsset: (
+    pick: PlayablePickResult,
+    asset: PlayableAssetRequest,
+  ) => Promise<string | undefined>;
   /** Writes a move back to surface HTML; resolves false when it cannot be made in place. */
   onWriteMove: (move: PlayableMove) => Promise<boolean>;
   /** Writes a visual scale/rotation change back to surface HTML. */
@@ -303,6 +330,8 @@ export function PlayableNodeWorkbench({
   const [appearanceTimingCommand, setAppearanceTimingCommand] =
     useState<PlayableAppearanceTimingCommand>();
   const appearanceTimingSequence = useRef(0);
+  const [motionCommand, setMotionCommand] = useState<PlayableMotionCommand>();
+  const motionSequence = useRef(0);
   const [snapshot, setSnapshot] = useState<NodeRuntimeSnapshot>();
   const [diagnostics, setDiagnostics] = useState<
     { message: string; at: string }[]
@@ -345,6 +374,7 @@ export function PlayableNodeWorkbench({
     setMedia([]);
     setMediaState({ currentTime: 0, duration: 0, paused: true });
     setMediaCommand(undefined);
+    setMotionCommand(undefined);
   }, [node.id]);
 
   useEffect(() => {
@@ -673,6 +703,165 @@ export function PlayableNodeWorkbench({
     ],
   );
 
+  const onApplyMotion = useCallback(
+    async (config: PlayableMotionConfig, createNew = false) => {
+      const pick = picks.at(-1);
+      if (createNew || !pick) {
+        const releaseRefreshSkip = reserveRuntimeRefreshSkip();
+        try {
+          const created = await onCreateMotion(config);
+          if (!created) {
+            releaseRefreshSkip();
+            showToast({ tone: "error", text: "无法添加独立动效" });
+            return;
+          }
+          setMotionCommand({
+            sequence: ++motionSequence.current,
+            target: {
+              kind: "create",
+              id: created.id,
+              nodeId: node.id,
+              source: created.source,
+            },
+            config,
+          });
+        } catch (cause) {
+          releaseRefreshSkip();
+          showToast({
+            tone: "error",
+            text: `无法添加动效：${errorMessage(cause)}`,
+          });
+        }
+        return;
+      }
+      if (!pick.source) {
+        showToast({ tone: "error", text: "该元素无法保存动效设置" });
+        return;
+      }
+      const releaseRefreshSkip = reserveRuntimeRefreshSkip();
+      try {
+        if (!(await onWriteMotion(pick, config))) {
+          releaseRefreshSkip();
+          showToast({ tone: "error", text: "该元素无法保存动效设置" });
+          return;
+        }
+        setPicks((current) =>
+          current.map((item) =>
+            playablePickKey(item) === playablePickKey(pick)
+              ? { ...item, motion: config }
+              : item,
+          ),
+        );
+        setInteractionSelections((current) =>
+          current.map((item) =>
+            playablePickKey(item.pick) === playablePickKey(pick)
+              ? { ...item, pick: { ...item.pick, motion: config } }
+              : item,
+          ),
+        );
+        setMotionCommand({
+          sequence: ++motionSequence.current,
+          target: { kind: "element", pick },
+          config,
+          ...(pick.buttonAssetId ? { assetId: pick.buttonAssetId } : {}),
+        });
+      } catch (cause) {
+        releaseRefreshSkip();
+        showToast({
+          tone: "error",
+          text: `无法保存动效：${errorMessage(cause)}`,
+        });
+      }
+    },
+    [
+      node.id,
+      onCreateMotion,
+      onWriteMotion,
+      picks,
+      reserveRuntimeRefreshSkip,
+      showToast,
+    ],
+  );
+
+  const onRemoveMotion = useCallback(async () => {
+    const pick = picks.at(-1);
+    if (!pick?.source) return;
+    const releaseRefreshSkip = reserveRuntimeRefreshSkip();
+    try {
+      if (!(await onWriteMotion(pick, undefined))) {
+        releaseRefreshSkip();
+        showToast({ tone: "error", text: "无法移除该动效" });
+        return;
+      }
+      setPicks((current) =>
+        current.map((item) =>
+          playablePickKey(item) === playablePickKey(pick)
+            ? { ...item, motion: undefined }
+            : item,
+        ),
+      );
+      setMotionCommand({
+        sequence: ++motionSequence.current,
+        target: { kind: "element", pick },
+        ...(pick.buttonAssetId ? { assetId: pick.buttonAssetId } : {}),
+      });
+    } catch (cause) {
+      releaseRefreshSkip();
+      showToast({ tone: "error", text: `无法移除动效：${errorMessage(cause)}` });
+    }
+  }, [onWriteMotion, picks, reserveRuntimeRefreshSkip, showToast]);
+
+  const onReplaceSelectedButton = useCallback(
+    async (asset: PlayableAssetRequest) => {
+      const pick = picks.at(-1);
+      if (pick?.tag !== "button" || !pick.source || asset.type !== "image") {
+        showToast({ tone: "error", text: "请先选择一个按钮，再替换图片素材" });
+        return;
+      }
+      const releaseRefreshSkip = reserveRuntimeRefreshSkip();
+      try {
+        const assetId = await onReplaceButtonAsset(pick, asset);
+        if (!assetId) {
+          releaseRefreshSkip();
+          showToast({ tone: "error", text: "无法替换按钮素材" });
+          return;
+        }
+        const blob = await getLibraryAsset(
+          asset.source.kind === "library" ? asset.source.assetId : asset.name,
+        );
+        setMotionCommand({
+          sequence: ++motionSequence.current,
+          target: { kind: "element", pick },
+          ...(pick.motion ? { config: pick.motion } : {}),
+          assetId,
+          asset: {
+            contentType: blob.type || "application/octet-stream",
+            bytes: await blob.arrayBuffer(),
+          },
+        });
+        setPicks((current) =>
+          current.map((item) =>
+            playablePickKey(item) === playablePickKey(pick)
+              ? { ...item, buttonAssetId: assetId }
+              : item,
+          ),
+        );
+      } catch (cause) {
+        releaseRefreshSkip();
+        showToast({
+          tone: "error",
+          text: `无法替换按钮素材：${errorMessage(cause)}`,
+        });
+      }
+    },
+    [
+      onReplaceButtonAsset,
+      picks,
+      reserveRuntimeRefreshSkip,
+      showToast,
+    ],
+  );
+
   const onMove = useCallback(
     (move: PlayableMove) => {
       void (async () => {
@@ -806,6 +995,10 @@ export function PlayableNodeWorkbench({
   const addMedia = useCallback(
     async (asset: PlayableAssetRequest, target: MediaTarget) => {
       try {
+        if (target === "button") {
+          await onReplaceSelectedButton(asset);
+          return;
+        }
         if (
           target === "backdrop" &&
           onSetBackdrop &&
@@ -831,7 +1024,7 @@ export function PlayableNodeWorkbench({
         });
       }
     },
-    [onAddAsset, onSetBackdrop, showToast],
+    [onAddAsset, onReplaceSelectedButton, onSetBackdrop, showToast],
   );
 
   const removeBackdrop = useCallback(async () => {
@@ -871,6 +1064,17 @@ export function PlayableNodeWorkbench({
     diagnostics,
   );
   const ready = Boolean(runtime.definition && runtime.assets);
+  const motionSignals = useMemo(
+    () =>
+      node.signals.filter((signal) =>
+        graph.edges.some(
+          (edge) =>
+            edge.source.nodeId === node.id &&
+            edge.source.signal === signal.id,
+        ),
+      ),
+    [graph.edges, node.id, node.signals],
+  );
   const canSetBackdrop = Boolean(backdrop && onSetBackdrop);
   const canRemoveBackdrop = Boolean(backdrop === "set" && onRemoveBackdrop);
   const chooser = useMediaChooser(
@@ -984,9 +1188,13 @@ export function PlayableNodeWorkbench({
             picks={picks.length}
             textSelection={textSelection}
             interactionSelection={interactionSelection}
+            motionSelection={picks.at(-1)}
+            motionSignals={motionSignals}
             fonts={fonts}
             onTextStyle={onTextStyle}
             onInteractionTiming={onInteractionTiming}
+            onApplyMotion={onApplyMotion}
+            onRemoveMotion={onRemoveMotion}
             onTool={setTool}
             mediaState={mediaState}
             onMediaCommand={setMediaCommand}
@@ -999,6 +1207,7 @@ export function PlayableNodeWorkbench({
                 uploading={chooser.uploading}
                 canSetBackdrop={canSetBackdrop}
                 canRemoveBackdrop={canRemoveBackdrop}
+                canReplaceButton={tool === "select" && picks.at(-1)?.tag === "button"}
                 onChoose={chooser.choose}
                 onRemoveBackdrop={() => void removeBackdrop()}
               />
@@ -1033,6 +1242,7 @@ export function PlayableNodeWorkbench({
           backdropEffects={backdropEffects}
           deleteCommand={deleteCommand}
           appearanceTimingCommand={appearanceTimingCommand}
+          motionCommand={motionCommand}
           onAppearanceTimingCommandApplied={(sequence) =>
             setAppearanceTimingCommand((current) =>
               current?.sequence === sequence ? undefined : current,
@@ -1169,12 +1379,16 @@ export function PreviewToolbar({
   picks,
   textSelection,
   interactionSelection,
+  motionSelection,
+  motionSignals,
   mediaState,
   onMediaCommand,
   onDeleteSelected,
   fonts,
   onTextStyle,
   onInteractionTiming,
+  onApplyMotion,
+  onRemoveMotion,
   onTool,
   onUndoStroke,
   onClearStrokes,
@@ -1186,6 +1400,8 @@ export function PreviewToolbar({
   picks: number;
   textSelection?: PlayableTextSelection;
   interactionSelection?: PlayableInteractionSelection;
+  motionSelection?: PlayablePickResult;
+  motionSignals: readonly { id: string; label: string }[];
   mediaState: PlayableMediaState;
   onMediaCommand: (command: PlayableMediaCommand) => void;
   onDeleteSelected: () => void;
@@ -1198,12 +1414,18 @@ export function PreviewToolbar({
     property: "appear" | "disappear",
     seconds: number | undefined,
   ) => void;
+  onApplyMotion: (
+    config: PlayableMotionConfig,
+    createNew?: boolean,
+  ) => Promise<void>;
+  onRemoveMotion: () => Promise<void>;
   onTool: (tool: PreviewTool) => void;
   onUndoStroke: () => void;
   onClearStrokes: () => void;
   /** An action after the tools, such as the Media menu. */
   media?: ReactNode;
 }) {
+  const [motionOpen, setMotionOpen] = useState(false);
   const fontFamilies =
     textSelection?.fontFamily && !fonts.includes(textSelection.fontFamily)
       ? [textSelection.fontFamily, ...fonts]
@@ -1312,6 +1534,24 @@ export function PreviewToolbar({
               aria-hidden="true"
             />
             {media}
+          </>
+        ) : null}
+        {tool === "select" ? (
+          <>
+            <span
+              className="playable-preview-toolbar-divider"
+              aria-hidden="true"
+            />
+            <button
+              type="button"
+              className={motionOpen ? "is-active" : undefined}
+              title="打开动效库"
+              aria-expanded={motionOpen}
+              onClick={() => setMotionOpen((open) => !open)}
+            >
+              <WandSparkles size={14} />
+              <span>动效</span>
+            </button>
           </>
         ) : null}
         {tool === "text" && textSelection ? (
@@ -1487,7 +1727,321 @@ export function PreviewToolbar({
           </>
         ) : null}
       </div>
+      {motionOpen && tool === "select" ? (
+        <MotionLibraryPopover
+          selection={motionSelection}
+          signals={motionSignals}
+          onApply={async (config, createNew) => {
+            await onApplyMotion(config, createNew);
+            setMotionOpen(false);
+          }}
+          onRemove={async () => {
+            await onRemoveMotion();
+            setMotionOpen(false);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+interface SavedMotionPreset {
+  name: string;
+  config: PlayableMotionConfig;
+}
+
+const MOTION_PRESET_KEY = "putenggame:motion-library:v1";
+
+function readMotionPresets(): SavedMotionPreset[] {
+  try {
+    const parsed: unknown = JSON.parse(
+      window.localStorage.getItem(MOTION_PRESET_KEY) ?? "[]",
+    );
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (item): item is SavedMotionPreset =>
+            typeof item?.name === "string" &&
+            item?.config &&
+            ["countdown", "progress-ring", "progress-bar", "hold-charge"].includes(
+              item.config.kind,
+            ) &&
+            ["visual", "interactive"].includes(item.config.mode) &&
+            typeof item.config.duration === "number",
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function MotionLibraryPopover({
+  selection,
+  signals,
+  onApply,
+  onRemove,
+}: {
+  selection?: PlayablePickResult;
+  signals: readonly { id: string; label: string }[];
+  onApply: (config: PlayableMotionConfig, createNew: boolean) => Promise<void>;
+  onRemove: () => Promise<void>;
+}) {
+  const [kind, setKind] = useState<PlayableMotionKind>("progress-bar");
+  const [mode, setMode] = useState<"visual" | "interactive">("visual");
+  const [duration, setDuration] = useState("5");
+  const [timeoutDuration, setTimeoutDuration] = useState("10");
+  const [signal, setSignal] = useState("");
+  const [timeoutSignal, setTimeoutSignal] = useState("");
+  const [presetName, setPresetName] = useState("");
+  const [presets, setPresets] = useState(readMotionPresets);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const config = selection?.motion;
+    const connected = (id: string | undefined) =>
+      id && signals.some((item) => item.id === id) ? id : "";
+    if (config) {
+      setKind(config.kind);
+      setMode(config.mode);
+      setDuration(String(config.duration));
+      setTimeoutDuration(
+        String(config.timeoutDuration ?? Math.max(config.duration * 2, config.duration + 1)),
+      );
+      const successSignal =
+        connected(config.signal) ||
+        connected(selection.signal) ||
+        signals[0]?.id ||
+        "";
+      setSignal(successSignal);
+      setTimeoutSignal(
+        connected(config.timeoutSignal) ||
+          signals.find((item) => item.id !== successSignal)?.id ||
+          signals[0]?.id ||
+          "",
+      );
+    } else if (selection) {
+      const successSignal = connected(selection.signal) || signals[0]?.id || "";
+      setSignal(successSignal);
+      setTimeoutDuration("10");
+      setTimeoutSignal(
+        signals.find((item) => item.id !== successSignal)?.id ??
+          signals[0]?.id ??
+          "",
+      );
+    } else {
+      setSignal(signals[0]?.id ?? "");
+      setTimeoutSignal(signals[1]?.id ?? signals[0]?.id ?? "");
+      setTimeoutDuration("10");
+    }
+  }, [selection?.cssPath, selection?.motion, selection?.signal, signals]);
+
+  const config: PlayableMotionConfig = {
+    kind,
+    mode,
+    duration: Number(duration),
+    ...(mode === "interactive" && kind === "hold-charge"
+      ? { timeoutDuration: Number(timeoutDuration) }
+      : {}),
+    ...(signal ? { signal } : {}),
+    ...(mode === "interactive" && timeoutSignal ? { timeoutSignal } : {}),
+  };
+  const valid =
+    Number.isFinite(config.duration) &&
+    config.duration >= 0.1 &&
+    config.duration <= 3600 &&
+    (config.timeoutDuration === undefined ||
+      (Number.isFinite(config.timeoutDuration) &&
+        config.timeoutDuration >= config.duration &&
+        config.timeoutDuration <= 3600));
+
+  const savePreset = () => {
+    const name = presetName.trim();
+    if (!name || !valid) return;
+    const next = [
+      ...presets.filter((preset) => preset.name !== name),
+      { name, config },
+    ].slice(-30);
+    try {
+      window.localStorage.setItem(MOTION_PRESET_KEY, JSON.stringify(next));
+      setPresets(next);
+      setPresetName("");
+      setSaving(false);
+    } catch {
+      setSaving(false);
+    }
+  };
+  const loadPreset = (value: string) => {
+    const preset = presets[Number(value)];
+    if (!preset) return;
+    setKind(preset.config.kind);
+    setMode(preset.config.mode);
+    setDuration(String(preset.config.duration));
+    const successSignal =
+      (preset.config.signal &&
+      signals.some((item) => item.id === preset.config.signal)
+        ? preset.config.signal
+        : signals[0]?.id) ?? "";
+    setSignal(successSignal);
+    setTimeoutSignal(
+      (preset.config.timeoutSignal &&
+      signals.some((item) => item.id === preset.config.timeoutSignal)
+        ? preset.config.timeoutSignal
+        : signals.find((item) => item.id !== successSignal)?.id ??
+          signals[0]?.id) ?? "",
+    );
+    setTimeoutDuration(
+      String(
+        preset.config.timeoutDuration ??
+          Math.max(preset.config.duration * 2, preset.config.duration + 1),
+      ),
+    );
+  };
+
+  return (
+    <section className="playable-preview-motion-library" aria-label="动效库">
+      <header>
+        <strong>动效库</strong>
+        {selection ? (
+          <span>{selection.tag === "button" ? "已选中按钮" : `已选中 ${selection.tag}`}</span>
+        ) : (
+          <span>添加独立动效</span>
+        )}
+      </header>
+      <label>
+        <span>动效类型</span>
+        <select
+          value={kind}
+          aria-label="动效类型"
+          onChange={(event) => setKind(event.target.value as PlayableMotionKind)}
+        >
+          <option value="countdown">倒计时</option>
+          <option value="progress-ring">圆环进度</option>
+          <option value="progress-bar">长条进度</option>
+          <option value="hold-charge">长按蓄力</option>
+        </select>
+      </label>
+      <label>
+        <span>运行方式</span>
+        <select
+          value={mode}
+          aria-label="运行方式"
+          onChange={(event) =>
+            setMode(event.target.value as "visual" | "interactive")
+          }
+        >
+          <option value="visual">仅展示，结束后自动继续</option>
+          <option value="interactive">需要玩家操作</option>
+        </select>
+      </label>
+      <label>
+        <span>持续时间（秒）</span>
+        <input
+          type="number"
+          aria-label="持续时间（秒）"
+          min="0.1"
+          max="3600"
+          step="0.1"
+          value={duration}
+          onChange={(event) => setDuration(event.target.value)}
+        />
+      </label>
+      <label>
+        <span>{mode === "visual" ? "结束后前往" : "成功后前往"}</span>
+        <select
+          value={signal}
+          aria-label="成功或自动前进出口"
+          onChange={(event) => setSignal(event.target.value)}
+        >
+          <option value="" disabled>选择剧情出口</option>
+          {signals.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {mode === "interactive" ? (
+        <label>
+          <span>超时后前往</span>
+          <select
+            value={timeoutSignal}
+            aria-label="超时出口"
+            onChange={(event) => setTimeoutSignal(event.target.value)}
+          >
+            <option value="" disabled>选择失败出口</option>
+            {signals.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {mode === "interactive" && kind === "hold-charge" ? (
+        <label>
+          <span>最长操作时间（秒）</span>
+          <input
+            type="number"
+            min={duration}
+            max="3600"
+            step="0.1"
+            value={timeoutDuration}
+            aria-label="最长操作时间（秒）"
+            onChange={(event) => setTimeoutDuration(event.target.value)}
+          />
+        </label>
+      ) : null}
+      {presets.length ? (
+        <label>
+          <span>已保存动效</span>
+          <select defaultValue="" onChange={(event) => loadPreset(event.target.value)}>
+            <option value="" disabled>选择预设</option>
+            {presets.map((preset, index) => (
+              <option key={`${preset.name}-${index}`} value={index}>
+                {preset.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      <div className="playable-preview-motion-actions">
+        <button
+          type="button"
+          disabled={!valid}
+          onClick={() => void onApply(config, !selection)}
+        >
+          {selection ? "应用到选中元素" : "添加独立动效"}
+        </button>
+        {selection ? (
+          <button type="button" disabled={!valid} onClick={() => void onApply(config, true)}>
+            添加独立动效
+          </button>
+        ) : null}
+        {selection?.motion ? (
+          <button type="button" onClick={() => void onRemove()}>
+            移除动效
+          </button>
+        ) : null}
+        <button type="button" onClick={() => setSaving((value) => !value)}>
+          保存为预设
+        </button>
+      </div>
+      {saving ? (
+        <div className="playable-preview-motion-save">
+          <input
+            value={presetName}
+            maxLength={32}
+            placeholder="预设名称"
+            onChange={(event) => setPresetName(event.target.value)}
+          />
+          <button type="button" disabled={!presetName.trim()} onClick={savePreset}>
+            保存
+          </button>
+        </div>
+      ) : null}
+      {!signals.length ? (
+        <small>此节点尚无已连线的剧情出口，动效可以播放，但剧情无法跳转。</small>
+      ) : null}
+    </section>
   );
 }
 
@@ -1626,8 +2180,8 @@ export function DrawingLayer({
   );
 }
 
-/** Where chosen media goes: the Scene's background, or the chat. */
-type MediaTarget = "backdrop" | "chat";
+/** Where chosen media goes: the Scene's background, chat, or a selected button. */
+type MediaTarget = "backdrop" | "chat" | "button";
 
 /**
  * Chooses an image or a video from the Library, or uploads a new one.
@@ -1661,7 +2215,11 @@ function useMediaChooser(
       <input
         ref={fileInput}
         type="file"
-        accept={ASSET_UPLOAD_ACCEPT}
+        accept={
+          target.current === "button"
+            ? ".png,.jpg,.jpeg,.webp"
+            : ASSET_UPLOAD_ACCEPT
+        }
         hidden
         onChange={(event) => {
           const file = event.target.files?.[0];
@@ -1684,11 +2242,15 @@ function useMediaChooser(
           title={
             target.current === "backdrop"
               ? "Choose a background"
-              : "Add to chat"
+              : target.current === "button"
+                ? "选择按钮图片"
+                : "Add to chat"
           }
           assets={library.filter((asset) => {
             const type = playableAssetType(asset.mediaType);
-            return type === "image" || type === "video";
+            return target.current === "button"
+              ? type === "image"
+              : type === "image" || type === "video";
           })}
           uploading={uploading}
           onUpload={() => fileInput.current?.click()}
@@ -1721,6 +2283,7 @@ function MediaMenu({
   uploading,
   canSetBackdrop,
   canRemoveBackdrop,
+  canReplaceButton,
   onChoose,
   onRemoveBackdrop,
 }: {
@@ -1728,6 +2291,7 @@ function MediaMenu({
   uploading: boolean;
   canSetBackdrop: boolean;
   canRemoveBackdrop: boolean;
+  canReplaceButton: boolean;
   onChoose: (to: MediaTarget) => void;
   onRemoveBackdrop: () => void;
 }) {
@@ -1745,7 +2309,7 @@ function MediaMenu({
       <button
         ref={button}
         type="button"
-        title="Add an image or a video"
+        title="添加图片或视频"
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={disabled || uploading}
@@ -1756,14 +2320,14 @@ function MediaMenu({
         ) : (
           <Image size={14} />
         )}
-        <span>Media</span>
+        <span>素材</span>
       </button>
       {open ? (
         <div
           ref={menu}
           className="playable-preview-popover is-media"
           role="menu"
-          aria-label="Media"
+          aria-label="素材"
         >
           <button
             type="button"
@@ -1777,24 +2341,38 @@ function MediaMenu({
             onClick={choose("backdrop")}
           >
             <Image size={13} />
-            <span>As background</span>
+            <span>设为背景</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canReplaceButton}
+            title={
+              canReplaceButton
+              ? "替换选中按钮的图片素材"
+              : "请先选择一个按钮"
+            }
+            onClick={choose("button")}
+          >
+            <Image size={13} />
+            <span>替换按钮图片</span>
           </button>
           <button type="button" role="menuitem" onClick={choose("chat")}>
             <MessageSquarePlus size={13} />
-            <span>Add to chat</span>
+            <span>添加到聊天</span>
           </button>
           {canRemoveBackdrop ? (
             <button
               type="button"
               role="menuitem"
-              title="Take the background off this Scene"
+              title="移除此场景背景"
               onClick={() => {
                 setOpen(false);
                 onRemoveBackdrop();
               }}
             >
               <ImageOff size={13} />
-              <span>Remove background</span>
+              <span>移除背景</span>
             </button>
           ) : null}
         </div>

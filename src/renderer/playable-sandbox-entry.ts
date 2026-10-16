@@ -70,6 +70,11 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
       session.host.updateAppearanceTiming(event.data.command.updates);
     return;
   }
+  if (event.data.kind === "putenggame:playable:motion") {
+    if (session?.instanceId === event.data.instanceId)
+      session.host.updateMotion(event.data.command);
+    return;
+  }
   if (event.data.kind === "putenggame:playable:backdrop-effects") {
     if (session?.instanceId === event.data.instanceId)
       session.host.setBackdropEffects(event.data.effects);

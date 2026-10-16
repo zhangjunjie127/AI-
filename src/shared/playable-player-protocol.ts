@@ -4,6 +4,7 @@ import type { PlayableTransform, PlayableTranslate } from "./playable-move.js";
 import type { PlayablePickResult } from "./playable-picker.js";
 import type { PlayableSeen } from "./playable-story-map.js";
 import type { PlayableBackdropEffects } from "./playable-backdrop-effects.js";
+import type { PlayableMotionConfig } from "./playable-motion.js";
 import type {
   NodeRuntimePolicy,
   NodeRuntimeSnapshot,
@@ -115,6 +116,16 @@ export interface PlayableAppearanceTimingCommand {
   updates: PlayableAppearanceTimingUpdate[];
 }
 
+export interface PlayableMotionCommand {
+  sequence: number;
+  target:
+    | { kind: "element"; pick: PlayablePickResult }
+    | { kind: "create"; id: string; nodeId: string; source: string };
+  config?: PlayableMotionConfig;
+  assetId?: string;
+  asset?: PlayableAssetTransfer;
+}
+
 /** An element the author dragged in the preview. */
 export interface PlayableMove {
   /** The element before it moved. */
@@ -194,6 +205,11 @@ export type PlayableHostMessage =
       kind: "putenggame:playable:appearance-timing";
       instanceId: string;
       command: PlayableAppearanceTimingCommand;
+    }
+  | {
+      kind: "putenggame:playable:motion";
+      instanceId: string;
+      command: PlayableMotionCommand;
     }
   | {
       kind: "putenggame:playable:backdrop-effects";
@@ -393,6 +409,50 @@ export function isPlayableHostMessage(
               update.endSeconds <= 3600)),
       )
     );
+  }
+  if (value.kind === "putenggame:playable:motion") {
+    const command = value.command;
+    if (
+      !isRecord(command) ||
+      typeof command.sequence !== "number" ||
+      !Number.isSafeInteger(command.sequence) ||
+      command.sequence < 1 ||
+      !isRecord(command.target) ||
+      !(
+        (command.target.kind === "element" &&
+          isRecord(command.target.pick) &&
+          typeof command.target.pick.nodeId === "string" &&
+          typeof command.target.pick.cssPath === "string" &&
+          typeof command.target.pick.tag === "string" &&
+          typeof command.target.pick.source === "string") ||
+        (command.target.kind === "create" &&
+          typeof command.target.id === "string" &&
+          typeof command.target.nodeId === "string" &&
+          typeof command.target.source === "string")
+      ) ||
+      (command.config !== undefined &&
+        (!isRecord(command.config) ||
+          !["countdown", "progress-ring", "progress-bar", "hold-charge"].includes(String(command.config.kind)) ||
+          !["interactive", "visual"].includes(String(command.config.mode)) ||
+          typeof command.config.duration !== "number" ||
+          !Number.isFinite(command.config.duration) ||
+          command.config.duration < 0.1 ||
+          command.config.duration > 3600 ||
+          (command.config.timeoutDuration !== undefined &&
+            (typeof command.config.timeoutDuration !== "number" ||
+              !Number.isFinite(command.config.timeoutDuration) ||
+              command.config.timeoutDuration < command.config.duration ||
+              command.config.timeoutDuration > 3600)) ||
+          (command.config.signal !== undefined && typeof command.config.signal !== "string") ||
+          (command.config.timeoutSignal !== undefined && typeof command.config.timeoutSignal !== "string"))) ||
+      (command.assetId !== undefined && typeof command.assetId !== "string") ||
+      (command.asset !== undefined &&
+        (!isRecord(command.asset) ||
+          typeof command.asset.contentType !== "string" ||
+          !(command.asset.bytes instanceof ArrayBuffer)))
+    )
+      return false;
+    return true;
   }
   if (value.kind === "putenggame:playable:backdrop-effects")
     return (

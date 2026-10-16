@@ -127,12 +127,15 @@ it("keeps a disappearance-time draft editable until the full value is committed"
         strokes={0}
         picks={1}
         interactionSelection={selection}
+        motionSignals={[]}
         mediaState={{ currentTime: 0, duration: 30, paused: true }}
         onMediaCommand={vi.fn()}
         onDeleteSelected={vi.fn()}
         fonts={[]}
         onTextStyle={vi.fn()}
         onInteractionTiming={onInteractionTiming}
+        onApplyMotion={vi.fn(async () => {})}
+        onRemoveMotion={vi.fn(async () => {})}
         onTool={vi.fn()}
         onUndoStroke={vi.fn()}
         onClearStrokes={vi.fn()}
@@ -167,4 +170,84 @@ it("keeps a disappearance-time draft editable until the full value is committed"
     endSeconds.dispatchEvent(new FocusEvent("focusout", { bubbles: true })),
   );
   expect(onInteractionTiming).toHaveBeenCalledWith("disappear", 20);
+});
+
+it("offers motion presets and applies the chosen interaction mode", async () => {
+  const onApplyMotion = vi.fn(async () => {});
+  const selection = {
+    nodeId: "start",
+    source: "nodes/start/index.html:1:1",
+    cssPath: "button",
+    signal: "success",
+    tag: "button",
+    text: "Continue",
+    box: { x: 0, y: 0, width: 100, height: 40 },
+  };
+
+  await act(async () =>
+    root.render(
+      <PreviewToolbar
+        tool="select"
+        disabled={false}
+        strokes={0}
+        picks={1}
+        motionSelection={selection}
+        motionSignals={[
+          { id: "success", label: "成功" },
+          { id: "timeout", label: "超时" },
+        ]}
+        mediaState={{ currentTime: 0, duration: 30, paused: true }}
+        onMediaCommand={vi.fn()}
+        onDeleteSelected={vi.fn()}
+        fonts={[]}
+        onTextStyle={vi.fn()}
+        onInteractionTiming={vi.fn()}
+        onApplyMotion={onApplyMotion}
+        onRemoveMotion={vi.fn(async () => {})}
+        onTool={vi.fn()}
+        onUndoStroke={vi.fn()}
+        onClearStrokes={vi.fn()}
+      />,
+    ),
+  );
+
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('[title="打开动效库"]')!.click(),
+  );
+  expect(container.textContent).toContain("倒计时");
+  expect(container.textContent).toContain("圆环进度");
+  expect(container.textContent).toContain("长条进度");
+  expect(container.textContent).toContain("长按蓄力");
+
+  const choose = async (selector: string, value: string) => {
+    const control = container.querySelector<HTMLSelectElement | HTMLInputElement>(
+      selector,
+    )!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        control instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLSelectElement.prototype,
+        "value",
+      )!.set!.call(control, value);
+      control.dispatchEvent(new Event("input", { bubbles: true }));
+      control.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  };
+  await choose('[aria-label="动效类型"]', "hold-charge");
+  await choose('[aria-label="运行方式"]', "interactive");
+  await choose('[aria-label="持续时间（秒）"]', "4");
+  await choose('[aria-label="超时出口"]', "timeout");
+  const apply = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent?.includes("应用到选中元素"),
+  )!;
+  await act(async () => apply.click());
+  expect(onApplyMotion).toHaveBeenCalledWith(
+    expect.objectContaining({
+      kind: "hold-charge",
+      mode: "interactive",
+      duration: 4,
+      signal: "success",
+      timeoutSignal: "timeout",
+    }),
+    false,
+  );
 });

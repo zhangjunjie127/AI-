@@ -16,6 +16,7 @@ import type {
   PlayableHistoryCommand,
   PlayableMediaCommand,
   PlayableMediaState,
+  PlayableMotionCommand,
   PlayableMove,
   PlayablePreviewOptions,
   PlayablePreviewTool,
@@ -79,6 +80,8 @@ export interface NodePlayerProps {
   /** Updates timed elements in the active preview without rebuilding it. */
   appearanceTimingCommand?: PlayableAppearanceTimingCommand;
   onAppearanceTimingCommandApplied?: (sequence: number) => void;
+  /** Applies animation and material edits without rebuilding the preview. */
+  motionCommand?: PlayableMotionCommand;
   mediaCommand?: PlayableMediaCommand;
   /** Called when the author leaves the tool (Escape in the frame). */
   onPickCancel?: () => void;
@@ -115,6 +118,7 @@ export function NodePlayer({
   deleteCommand,
   appearanceTimingCommand,
   onAppearanceTimingCommandApplied,
+  motionCommand,
   mediaCommand,
   onPickCancel,
   onSnapshot,
@@ -127,6 +131,7 @@ export function NodePlayer({
     { instanceId: string; state: PlayableMediaState } | undefined
   >(undefined);
   const appliedAppearanceTimingSequence = useRef<number | undefined>(undefined);
+  const appliedMotionSequence = useRef<number | undefined>(undefined);
   const [scale, setScale] = useState<number>();
   // Keyed on content so callers need not memoize the preview object.
   const previewKey = JSON.stringify(preview ?? null);
@@ -366,6 +371,28 @@ export function NodePlayer({
     ready,
     onAppearanceTimingCommandApplied,
   ]);
+
+  useEffect(() => {
+    if (
+      !ready ||
+      !motionCommand ||
+      appliedMotionSequence.current === motionCommand.sequence
+    )
+      return;
+    const bytes = motionCommand.asset?.bytes.slice(0);
+    iframe.current?.contentWindow?.postMessage(
+      {
+        kind: "putenggame:playable:motion",
+        instanceId,
+        command: bytes
+          ? { ...motionCommand, asset: { ...motionCommand.asset!, bytes } }
+          : motionCommand,
+      },
+      "*",
+      bytes ? [bytes] : [],
+    );
+    appliedMotionSequence.current = motionCommand.sequence;
+  }, [instanceId, motionCommand, ready]);
 
   const backdropEffectsKey = JSON.stringify(backdropEffects ?? null);
   useEffect(() => {

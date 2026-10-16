@@ -58,6 +58,13 @@ import {
   setPlayableElementTranslate,
 } from "../shared/playable-move.js";
 import {
+  insertPlayableMotion,
+  PLAYABLE_MOTION_ATTRIBUTES,
+  setPlayableElementAttributes,
+  type PlayableMotionConfig,
+} from "../shared/playable-motion.js";
+import type { PlayablePickResult } from "../shared/playable-picker.js";
+import {
   isPlayableStoryEnding,
   withPlayableStoryOption,
 } from "../shared/playable-story-map.js";
@@ -1375,6 +1382,101 @@ export function PlayableEditorWorkspace({
     return true;
   }
 
+  async function writeMotion(
+    pick: PlayablePickResult,
+    config: PlayableMotionConfig | undefined,
+    assetId?: string,
+  ): Promise<boolean> {
+    const graph = codebase?.graph;
+    const location = pick.source
+      ? parsePlayableSourceLocation(pick.source)
+      : undefined;
+    const node = graph?.nodes.find((candidate) => candidate.id === pick.nodeId);
+    if (!graph || !location || !node || node.source.html !== location.file)
+      return false;
+    const file = await getWorkspaceFile(projectId, location.file);
+    const before = file.truncated ? undefined : file.content;
+    if (before === undefined) return false;
+    const html = setPlayableElementAttributes(before, location, pick.tag, {
+      [PLAYABLE_MOTION_ATTRIBUTES.kind]: config?.kind,
+      [PLAYABLE_MOTION_ATTRIBUTES.mode]: config?.mode,
+      [PLAYABLE_MOTION_ATTRIBUTES.duration]:
+        config === undefined ? undefined : String(config.duration),
+      [PLAYABLE_MOTION_ATTRIBUTES.timeoutDuration]:
+        config?.timeoutDuration === undefined
+          ? undefined
+          : String(config.timeoutDuration),
+      [PLAYABLE_MOTION_ATTRIBUTES.signal]: config?.signal,
+      [PLAYABLE_MOTION_ATTRIBUTES.timeoutSignal]: config?.timeoutSignal,
+      [PLAYABLE_MOTION_ATTRIBUTES.asset]: assetId ?? pick.buttonAssetId,
+    });
+    if (html === undefined) return false;
+    await writeSources(
+      graph,
+      { [location.file]: html },
+      { [location.file]: before },
+      assetId ? "替换按钮素材" : config ? "设置动效" : "移除动效",
+    );
+    return true;
+  }
+
+  async function createMotion(
+    config: PlayableMotionConfig,
+  ): Promise<{ id: string; source: string } | undefined> {
+    const graph = codebase?.graph;
+    const node = graph?.nodes.find((candidate) => candidate.id === openedNodeId);
+    if (!graph || !node) return undefined;
+    const path = node.source.html;
+    const file = await getWorkspaceFile(projectId, path);
+    if (file.content === undefined || file.truncated) return undefined;
+    const id = `putenggame-motion-${Math.random().toString(36).slice(2, 10)}`;
+    const inserted = insertPlayableMotion(file.content, path, config, id);
+    if (!inserted) return undefined;
+    await writeSources(
+      graph,
+      { [path]: inserted.html },
+      { [path]: file.content },
+      "添加动效",
+    );
+    return { id, source: inserted.source };
+  }
+
+  async function replaceButtonAsset(
+    pick: PlayablePickResult,
+    asset: PlayableAssetRequest,
+  ): Promise<string | undefined> {
+    const current = latestCodebase.current;
+    const graph = current?.graph;
+    const location = pick.source
+      ? parsePlayableSourceLocation(pick.source)
+      : undefined;
+    const node = graph?.nodes.find((candidate) => candidate.id === pick.nodeId);
+    if (
+      !graph ||
+      !location ||
+      !node ||
+      node.source.html !== location.file ||
+      pick.tag !== "button" ||
+      asset.type !== "image"
+    )
+      return undefined;
+    const file = await getWorkspaceFile(projectId, location.file);
+    const before = file.truncated ? undefined : file.content;
+    if (before === undefined) return undefined;
+    const withAsset = addPlayableNodeAsset(graph, node.id, asset);
+    const html = setPlayableElementAttributes(before, location, pick.tag, {
+      [PLAYABLE_MOTION_ATTRIBUTES.asset]: withAsset.assetId,
+    });
+    if (html === undefined) return undefined;
+    await writeSources(
+      withAsset.graph,
+      { [location.file]: html },
+      { [location.file]: before },
+      "替换按钮素材",
+    );
+    return withAsset.assetId;
+  }
+
   async function writeAffectionConfig(
     nodeId: string,
     config: PlayableAffectionConfig,
@@ -2371,6 +2473,9 @@ export function PlayableEditorWorkspace({
           }
           onWriteTextStyle={writeTextStyle}
           onWriteInteractionTimings={writeInteractionTimings}
+          onWriteMotion={writeMotion}
+          onCreateMotion={createMotion}
+          onReplaceButtonAsset={replaceButtonAsset}
           onWriteMove={writeMove}
           onWriteTransform={writeTransform}
           onWriteDelete={writeDelete}

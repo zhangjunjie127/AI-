@@ -238,12 +238,12 @@ export function LibraryAssetPicker({
               ) : (
                 <Upload size={14} />
               )}
-              <span>Upload</span>
+              <span>上传</span>
             </button>
           ) : null}
           <button
             type="button"
-            aria-label="Close Library picker"
+            aria-label="关闭素材库"
             onClick={onClose}
           >
             <X size={16} />
@@ -255,7 +255,7 @@ export function LibraryAssetPicker({
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search Library"
+              placeholder="搜索素材库"
             />
           </label>
           <LibraryCollectionFilters
@@ -269,8 +269,8 @@ export function LibraryAssetPicker({
           {visibleAssets.length === 0 ? (
             <p>
               {assets.length
-                ? "No assets match your search"
-                : "No assets in Library"}
+                ? "没有符合搜索条件的素材"
+                : "素材库暂无素材"}
             </p>
           ) : null}
           {visibleAssets.map((asset) => (

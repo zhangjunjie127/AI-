@@ -1,4 +1,9 @@
 import { PLAYABLE_SOURCE_ATTRIBUTE } from "./playable-source-locations.js";
+import {
+  parsePlayableMotionConfig,
+  PLAYABLE_MOTION_ATTRIBUTES,
+  type PlayableMotionConfig,
+} from "./playable-motion.js";
 
 export interface PlayablePickResult {
   nodeId: string;
@@ -8,6 +13,8 @@ export interface PlayablePickResult {
   cssPath: string;
   /** The Signal named by the nearest `data-signal` attribute, such as an Exit button's. */
   signal?: string;
+  motion?: PlayableMotionConfig;
+  buttonAssetId?: string;
   tag: string;
   /** The element shows media: an image, a video, or a `data-media` slot for one. */
   media?: true;
@@ -170,12 +177,17 @@ export function describePlayablePick(
   const rect = target.getBoundingClientRect();
   const tag = target.tagName.toLowerCase();
   const mediaSlot = target.getAttribute(MEDIA_ATTRIBUTE);
+  const motion = parsePlayableMotionConfig(target);
+  const buttonAssetId =
+    target.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.asset) || undefined;
   const media = MEDIA_TAGS.has(tag) || mediaSlot !== null;
   return {
     nodeId: surface.getAttribute(SURFACE_ATTRIBUTE)!,
     ...(source ? { source } : {}),
     cssPath: playableCssPath(target),
     ...(signal ? { signal } : {}),
+    ...(motion ? { motion } : {}),
+    ...(buttonAssetId ? { buttonAssetId } : {}),
     tag,
     ...(media ? { media: true as const } : {}),
     ...(mediaSlot ? { mediaSlot } : {}),

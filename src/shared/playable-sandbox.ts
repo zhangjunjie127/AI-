@@ -28,6 +28,7 @@ import type {
   PlayableTextSelection,
   PlayableInteractionSelection,
   PlayableAppearanceTimingUpdate,
+  PlayableMotionCommand,
   PlayableMediaCommand,
   PlayableMediaState,
   PlayableTransformEdit,
@@ -37,6 +38,11 @@ import {
   PLAYABLE_BACKDROP_VIGNETTE_VARIABLE,
   type PlayableBackdropEffects,
 } from "./playable-backdrop-effects.js";
+import {
+  mountPlayableMotionElement,
+  PLAYABLE_MOTION_ATTRIBUTES,
+  type PlayableMotionConfig,
+} from "./playable-motion.js";
 import { PLAYABLE_SOURCE_ATTRIBUTE } from "./playable-source-locations.js";
 import type {
   PlayableMountedSurface,
@@ -67,6 +73,10 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
   #mediaListener?: (state: PlayableMediaState) => void;
   #mediaBindings = new WeakSet<HTMLVideoElement>();
   #mediaObservers: MutationObserver[] = [];
+  #motionCleanups = new WeakMap<HTMLElement, () => void>();
+  #motionContexts = new WeakMap<HTMLElement, PlayableNodeContext>();
+  #motionContextsBySurface = new Map<string, PlayableNodeContext>();
+  #motionAssetUrls = new Set<string>();
   #surfaceStartedAt = new WeakMap<HTMLElement, number>();
   #timingTimer?: number;
   #backdropEffects?: PlayableBackdropEffects;
@@ -134,6 +144,8 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       this.#document.defaultView!.clearTimeout(this.#timingTimer);
     for (const observer of this.#mediaObservers) observer.disconnect();
     this.#mediaObservers = [];
+    for (const url of this.#motionAssetUrls) URL.revokeObjectURL(url);
+    this.#motionAssetUrls.clear();
     this.#mediaListener = undefined;
     this.#projectRoot.remove();
   }
@@ -1197,6 +1209,80 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
     this.#updateTimedVisibility();
   }
 
+  updateMotion(command: PlayableMotionCommand): void {
+    const target = command.target;
+    const surfaceId =
+      target.kind === "element" ? target.pick.nodeId : target.nodeId;
+    const surface = [...this.#nodeLayer.querySelectorAll<HTMLElement>(
+      "[data-playable-surface]",
+    )].find((candidate) => candidate.dataset.playableSurface === surfaceId);
+    const root = surface?.shadowRoot;
+    if (!root) return;
+    let element: HTMLElement | null = null;
+    if (target.kind === "element") {
+      try {
+        const candidate = root.querySelector<HTMLElement>(target.pick.cssPath);
+        if (
+          candidate?.tagName.toLowerCase() === target.pick.tag &&
+          candidate.getAttribute(PLAYABLE_SOURCE_ATTRIBUTE) === target.pick.source
+        )
+          element = candidate;
+      } catch {
+        return;
+      }
+    } else {
+      element = root.getElementById(target.id);
+      if (!element) {
+        element = this.#document.createElement("div");
+        element.id = target.id;
+        element.setAttribute(PLAYABLE_SOURCE_ATTRIBUTE, target.source);
+        Object.assign(element.style, {
+          position: "absolute",
+          left: "40cqw",
+          top: "40cqh",
+          width: "20cqw",
+          height: "5cqh",
+          display: "grid",
+          placeItems: "center",
+        });
+        (root.querySelector<HTMLElement>(".stage") ?? root.firstElementChild ?? root).append(element);
+      }
+    }
+    if (!element) return;
+
+    this.#motionCleanups.get(element)?.();
+    for (const [name, value] of Object.entries({
+      [PLAYABLE_MOTION_ATTRIBUTES.kind]: command.config?.kind,
+      [PLAYABLE_MOTION_ATTRIBUTES.mode]: command.config?.mode,
+      [PLAYABLE_MOTION_ATTRIBUTES.duration]:
+        command.config === undefined ? undefined : String(command.config.duration),
+      [PLAYABLE_MOTION_ATTRIBUTES.signal]: command.config?.signal,
+      [PLAYABLE_MOTION_ATTRIBUTES.timeoutSignal]: command.config?.timeoutSignal,
+      [PLAYABLE_MOTION_ATTRIBUTES.asset]: command.assetId,
+    }))
+      if (value === undefined) element.removeAttribute(name);
+      else element.setAttribute(name, value);
+
+    if (command.asset && command.assetId) {
+      const url = URL.createObjectURL(
+        new Blob([command.asset.bytes], { type: command.asset.contentType }),
+      );
+      this.#motionAssetUrls.add(url);
+      element.style.backgroundImage = `url("${url}")`;
+      element.style.backgroundSize = "cover";
+      element.style.backgroundPosition = "center";
+    }
+    const context =
+      this.#motionContexts.get(element) ??
+      this.#motionContextsBySurface.get(surfaceId);
+    if (context) this.#motionContexts.set(element, context);
+    if (context)
+      this.#motionCleanups.set(
+        element,
+        mountPlayableMotionElement(element, context),
+      );
+  }
+
   async #mount(
     layer: HTMLElement,
     surface: CompiledPlayableSurface,
@@ -1235,10 +1321,31 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         throw new Error(
           `Playable surface "${surface.id}" does not export a mount function.`,
         );
-      const cleanup = await module.mount({ ...context, root });
+      const nodeContext = { ...context, root };
+      const cleanup = await module.mount(nodeContext);
+      this.#motionContextsBySurface.set(surface.id, nodeContext);
+      const motionCleanups: (() => void)[] = [];
+      for (const element of root.querySelectorAll<HTMLElement>(
+        `[${PLAYABLE_MOTION_ATTRIBUTES.kind}], [${PLAYABLE_MOTION_ATTRIBUTES.asset}]`,
+      )) {
+        this.#motionContexts.set(element, nodeContext);
+        const cleanup = mountPlayableMotionElement(element, nodeContext);
+        this.#motionCleanups.set(element, cleanup);
+        motionCleanups.push(cleanup);
+      }
       this.#observeMedia(root);
       return {
-        cleanup: cleanup as PlayableCleanup | undefined,
+        cleanup: async () => {
+          motionCleanups.forEach((cleanup) => cleanup());
+          for (const element of root.querySelectorAll<HTMLElement>(
+            `[${PLAYABLE_MOTION_ATTRIBUTES.kind}], [${PLAYABLE_MOTION_ATTRIBUTES.asset}]`,
+          )) {
+            this.#motionContexts.delete(element);
+            this.#motionCleanups.delete(element);
+          }
+          this.#motionContextsBySurface.delete(surface.id);
+          await (cleanup as PlayableCleanup | undefined)?.();
+        },
         destroy: () => host.remove(),
       };
     } catch (cause) {

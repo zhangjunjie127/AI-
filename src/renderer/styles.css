@@ -16806,6 +16806,78 @@ button {
   min-width: 150px;
   transform: translateX(-50%);
 }
+.playable-preview-motion-library {
+  position: absolute;
+  right: 50%;
+  bottom: calc(100% + 8px);
+  display: grid;
+  width: min(300px, calc(100vw - 24px));
+  max-height: min(62vh, 520px);
+  gap: 8px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--menu-surface);
+  color: var(--text);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 22%);
+  pointer-events: auto;
+  transform: translateX(50%);
+}
+.playable-preview-motion-library > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.playable-preview-motion-library > header span,
+.playable-preview-motion-library small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.playable-preview-motion-library > label {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.playable-preview-motion-library select,
+.playable-preview-motion-library input {
+  min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--story-editor-surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+.playable-preview-motion-actions,
+.playable-preview-motion-save {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.playable-preview-toolbar .playable-preview-motion-library button {
+  min-height: 29px;
+  height: auto;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--story-editor-surface);
+  color: var(--text);
+  font-size: 11px;
+}
+.playable-preview-toolbar .playable-preview-motion-library button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.playable-preview-motion-save input {
+  flex: 1;
+}
 .playable-preview-toolbar .playable-preview-popover.is-media button {
   justify-content: flex-start;
   width: 100%;
