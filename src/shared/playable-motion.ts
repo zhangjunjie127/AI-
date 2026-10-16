@@ -37,6 +37,7 @@ export const PLAYABLE_MOTION_ATTRIBUTES = {
   assetScale: "data-putenggame-button-asset-scale",
   assetScaleX: "data-putenggame-button-asset-scale-x",
   assetScaleY: "data-putenggame-button-asset-scale-y",
+  labelTranslate: "data-putenggame-button-label-translate",
 } as const;
 
 export const PLAYABLE_BUTTON_ASSET_SCALE_MIN = 10;
@@ -245,6 +246,13 @@ function mountPlayableButtonAsset(
     objectFit: "contain",
   });
   layer.append(image);
+  const label = wrapButtonLabel(element);
+  const labelTranslate =
+    element.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.labelTranslate) ?? "";
+  if (label) {
+    label.style.scale = `${100 / x} ${100 / y}`;
+    label.style.translate = labelTranslate;
+  }
   element.prepend(layer);
   element.style.backgroundImage = "none";
   element.style.isolation = "isolate";
@@ -253,11 +261,45 @@ function mountPlayableButtonAsset(
     element.style.position = "relative";
   return () => {
     layer.remove();
+    unwrapButtonLabel(label);
     element.style.backgroundImage = previous.backgroundImage;
     element.style.isolation = previous.isolation;
     element.style.position = previous.position;
     element.style.scale = previous.scale;
   };
+}
+
+function wrapButtonLabel(button: HTMLElement): HTMLSpanElement | undefined {
+  const textNodes = Array.from(button.childNodes).filter(
+    (child): child is Text =>
+      child.nodeType === 3 && Boolean(child.textContent?.trim()),
+  );
+  const first = textNodes[0];
+  if (!first) return undefined;
+  const label = button.ownerDocument.createElement("span");
+  label.dataset.putenggameButtonLabel = "";
+  Object.assign(label.style, {
+    display: "inline-block",
+    transformOrigin: "center",
+    verticalAlign: "inherit",
+  });
+  first.replaceWith(label);
+  for (const node of textNodes) label.append(node);
+  return label;
+}
+
+function unwrapButtonLabel(label: HTMLSpanElement | undefined): void {
+  if (!label) return;
+  label.replaceWith(...Array.from(label.childNodes));
+}
+
+export function updatePlayableButtonLabelScale(button: HTMLElement): void {
+  const label = button.querySelector<HTMLElement>(
+    "[data-putenggame-button-label]",
+  );
+  if (!label) return;
+  const { x, y } = playableButtonAssetScales(button);
+  label.style.scale = `${100 / x} ${100 / y}`;
 }
 
 function mountMotion(

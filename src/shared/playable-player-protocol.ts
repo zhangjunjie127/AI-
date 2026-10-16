@@ -151,6 +151,8 @@ export interface PlayableMotionCommand {
 export interface PlayableMove {
   /** The element before it moved. */
   pick: PlayablePickResult;
+  /** Moves the visible label without moving the button or its hit area. */
+  part?: "button-label";
   /** Where it ends up, from where its layout puts it. */
   translate: PlayableTranslate;
   /**
@@ -618,6 +620,8 @@ export function isPlayableFrameMessage(
       isRecord(value.move.translate) &&
       typeof value.move.translate.x === "number" &&
       typeof value.move.translate.y === "number" &&
+      (value.move.part === undefined ||
+        value.move.part === "button-label") &&
       typeof value.move.inPlace === "boolean"
     );
   if (value.kind === "putenggame:playable:transformed")

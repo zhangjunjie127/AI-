@@ -120,6 +120,35 @@ describe("Playable sandbox", () => {
     ).toBe(false);
   });
 
+  it("accepts moves for a button label without changing the move protocol shape", () => {
+    const message = {
+      kind: "putenggame:playable:moved",
+      instanceId: "instance",
+      move: {
+        pick: {
+          nodeId: "choice",
+          source: "nodes/choice/index.html:2:1",
+          cssPath: "main > button",
+          tag: "button",
+          buttonAssetId: "button-background",
+          text: "Continue",
+          box: { x: 0, y: 0, width: 100, height: 40 },
+        },
+        part: "button-label",
+        translate: { x: 4, y: -2 },
+        inPlace: true,
+      },
+    };
+
+    expect(isPlayableFrameMessage(message)).toBe(true);
+    expect(
+      isPlayableFrameMessage({
+        ...message,
+        move: { ...message.move, part: "button-image" },
+      }),
+    ).toBe(false);
+  });
+
   it("validates in-place appearance timing commands", () => {
     const message = {
       kind: "putenggame:playable:appearance-timing",

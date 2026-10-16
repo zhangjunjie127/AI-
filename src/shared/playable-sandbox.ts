@@ -44,6 +44,7 @@ import {
   mountPlayableMotionElement,
   PLAYABLE_MOTION_ATTRIBUTES,
   type PlayableMotionConfig,
+  updatePlayableButtonLabelScale,
 } from "./playable-motion.js";
 import { PLAYABLE_SOURCE_ATTRIBUTE } from "./playable-source-locations.js";
 import type {
@@ -156,6 +157,7 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
           String(command.scaleY),
         );
         element.style.scale = `${command.scaleX / 100} ${command.scaleY / 100}`;
+        updatePlayableButtonLabelScale(element);
         this.#picking?.refresh();
       } catch {
         return;
@@ -600,11 +602,17 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         pointerId: pointer.pointerId,
         start: { x: pointer.clientX, y: pointer.clientY },
         delta: { x: 0, y: 0 },
+        box: selectedBox(element),
         size: { width: size.width, height: size.height },
         base: base ?? { x: 0, y: 0 },
         original,
         inPlace:
-          base !== undefined && element.hasAttribute(PLAYABLE_SOURCE_ATTRIBUTE),
+          base !== undefined &&
+          (target.part === "button-label"
+            ? Boolean(
+                element.parentElement?.hasAttribute(PLAYABLE_SOURCE_ATTRIBUTE),
+              )
+            : element.hasAttribute(PLAYABLE_SOURCE_ATTRIBUTE)),
       };
       // A transition on the element would make it trail the pointer.
       element.style.transition = "none";
@@ -621,9 +629,9 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       current.delta = delta;
       current.element.style.translate = `calc(${current.base.x}cqw + ${delta.x}px) calc(${current.base.y}cqh + ${delta.y}px)`;
       place({
-        ...current.pick.box,
-        x: current.pick.box.x + delta.x,
-        y: current.pick.box.y + delta.y,
+        ...current.box,
+        x: current.box.x + delta.x,
+        y: current.box.y + delta.y,
       });
     };
     const endDrag = (commit: boolean) => {
@@ -647,7 +655,13 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
           : original.translate;
       element.style.transition = original.transition;
       place(undefined);
-      if (moved) handlers.onMove({ pick: current.pick, translate, inPlace });
+      if (moved)
+        handlers.onMove({
+          pick: current.pick,
+          ...(current.part ? { part: current.part } : {}),
+          translate,
+          inPlace,
+        });
     };
     const startTransform = (
       kind: TransformHandleKind,
@@ -986,7 +1000,12 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         ? eventPath
         : pendingClickPath;
       pendingClickPath = undefined;
-      const pick = path ? describePlayablePick(path) : undefined;
+      const label = path ? buttonLabelInPath(path) : undefined;
+      const pick = label?.parentElement
+        ? pickForElement(label.parentElement)
+        : path
+          ? describePlayablePick(path)
+          : undefined;
       if (!pick) {
         if (tool === "text") {
           handlers.onTextSelect(undefined);
@@ -1077,7 +1096,7 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         }
         return;
       }
-      const target = event.composedPath()[0];
+      const target = label ?? path?.[0];
       if (!isTextTarget(target)) {
         handlers.onTextSelect(undefined);
         place(undefined);
@@ -1718,6 +1737,8 @@ interface Dragging {
   element: HTMLElement;
   /** The element before the drag started. */
   pick: PlayablePickResult;
+  part?: "button-label";
+  box: PlayablePickResult["box"];
   pointerId: number;
   start: { x: number; y: number };
   /** How far the pointer has moved, in the frame's CSS pixels. */
@@ -2015,12 +2036,32 @@ function movableTarget(
   selectable: ReadonlySet<HTMLElement>,
   x: number,
   y: number,
-): { element: HTMLElement; pick: PlayablePickResult } | undefined {
+): {
+  element: HTMLElement;
+  pick: PlayablePickResult;
+  part?: "button-label";
+} | undefined {
+  const label = buttonLabelInPath(path);
+  if (label?.parentElement && selectable.has(label.parentElement)) {
+    const pick = pickForElement(label.parentElement);
+    if (pick?.buttonAssetId)
+      return { element: label, pick, part: "button-label" };
+  }
   const element = selectableElementAtPoint(path, selectable, x, y);
   if (!element) return undefined;
   const pick = pickForElement(element);
   if (!pick || pick.mediaSlot === "backdrop") return undefined;
   return { element, pick };
+}
+
+function buttonLabelInPath(
+  path: readonly EventTarget[],
+): HTMLElement | undefined {
+  return path.find(
+    (target): target is HTMLElement =>
+      target instanceof HTMLElement &&
+      target.hasAttribute("data-putenggame-button-label"),
+  );
 }
 
 function selectableElementAtPoint(
@@ -2117,7 +2158,11 @@ function isTextTarget(target: unknown): boolean {
  * be rewritten directly.
  */
 function holdsSourceText(element: Element): boolean {
-  return element.hasAttribute(PLAYABLE_SOURCE_ATTRIBUTE);
+  return (
+    element.hasAttribute(PLAYABLE_SOURCE_ATTRIBUTE) ||
+    (element.hasAttribute("data-putenggame-button-label") &&
+      element.parentElement?.hasAttribute(PLAYABLE_SOURCE_ATTRIBUTE) === true)
+  );
 }
 
 function parseDelaySeconds(value: string): number {

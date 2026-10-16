@@ -5,6 +5,7 @@ import {
   mountPlayableMotionElement,
   playableButtonAssetScales,
   setPlayableElementAttributes,
+  updatePlayableButtonLabelScale,
 } from "../src/shared/playable-motion.js";
 
 it("updates only attributes on the source element and preserves its other markup", () => {
@@ -67,6 +68,7 @@ it("keeps the existing button signal handler when an interactive motion is attac
 
 it("scales the replacement image and button hit area together without cropping", () => {
   const button = document.createElement("button");
+  button.textContent = "Continue";
   button.style.width = "180px";
   button.style.height = "48px";
   button.style.backgroundImage = 'url("original.png")';
@@ -75,6 +77,10 @@ it("scales the replacement image and button hit area together without cropping",
   button.setAttribute("data-putenggame-button-asset", "replacement");
   button.setAttribute("data-putenggame-button-asset-scale-x", "150");
   button.setAttribute("data-putenggame-button-asset-scale-y", "80");
+  button.setAttribute(
+    "data-putenggame-button-label-translate",
+    "4cqw -2cqh",
+  );
 
   const cleanup = mountPlayableMotionElement(button, {
     root: document.createElement("div").attachShadow({ mode: "open" }),
@@ -101,13 +107,45 @@ it("scales the replacement image and button hit area together without cropping",
   expect(button.style.isolation).toBe("isolate");
   expect(button.style.width).toBe("180px");
   expect(button.style.height).toBe("48px");
+  const label = button.querySelector<HTMLElement>(
+    "[data-putenggame-button-label]",
+  )!;
+  expect(label.textContent).toBe("Continue");
+  expect(label.style.scale).toBe(`${100 / 150} ${100 / 80}`);
+  expect(label.style.translate).toBe("4cqw -2cqh");
+  button.setAttribute("data-putenggame-button-asset-scale-x", "200");
+  button.style.scale = "2 0.8";
+  updatePlayableButtonLabelScale(button);
+  expect(label.style.scale).toBe(`${100 / 200} ${100 / 80}`);
+  expect(button.style.scale).toBe("2 0.8");
+  const click = vi.fn();
+  button.addEventListener("click", click);
+  label.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  expect(click).toHaveBeenCalledOnce();
 
   cleanup();
   expect(button.querySelector("[data-putenggame-button-asset-image]")).toBeNull();
+  expect(button.querySelector("[data-putenggame-button-label]")).toBeNull();
+  expect(button.textContent).toBe("Continue");
   expect(button.style.backgroundImage).toContain("original.png");
   expect(button.style.isolation).toBe("auto");
   expect(button.style.scale).toBe("");
   expect(button.style.position).toBe("absolute");
+});
+
+it("saves button label movement on its own attribute, not on the button", () => {
+  const source = '<main>\n  <button style="color: red">Continue</button>\n</main>';
+  const updated = setPlayableElementAttributes(
+    source,
+    { line: 2, column: 3 },
+    "button",
+    { "data-putenggame-button-label-translate": "4cqw -2cqh" },
+  );
+
+  expect(updated).toContain(
+    '<button style="color: red" data-putenggame-button-label-translate="4cqw -2cqh">',
+  );
+  expect(updated).not.toContain("translate:");
 });
 
 it("uses the previous single scale value for scenes without axis-specific scales", () => {

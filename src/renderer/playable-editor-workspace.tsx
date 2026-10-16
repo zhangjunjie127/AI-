@@ -52,6 +52,7 @@ import {
 import { arrangePlayableNodes } from "./playable-flow.js";
 import { type NodeGraph, type PlayableNode } from "../shared/playable-nodes.js";
 import {
+  playableTranslateValue,
   setPlayableElementStyle,
   setPlayableElementTiming,
   setPlayableElementTransform,
@@ -1663,19 +1664,31 @@ export function PlayableEditorWorkspace({
     const html =
       before === undefined
         ? undefined
-        : setPlayableElementTranslate(
-            before,
-            location,
-            move.pick.tag,
-            move.translate,
-          );
+        : move.part === "button-label"
+          ? move.pick.tag !== "button" || !move.pick.buttonAssetId
+            ? undefined
+            : setPlayableElementAttributes(
+                before,
+                location,
+                "button",
+                {
+                  [PLAYABLE_MOTION_ATTRIBUTES.labelTranslate]:
+                    playableTranslateValue(move.translate),
+                },
+              )
+          : setPlayableElementTranslate(
+              before,
+              location,
+              move.pick.tag,
+              move.translate,
+            );
     if (before === undefined || html === undefined) return false;
     if (html !== before)
       await writeSources(
         graph,
         { [location.file]: html },
         { [location.file]: before },
-        "移动元素",
+        move.part === "button-label" ? "移动按钮文字" : "移动元素",
       );
     return true;
   }
