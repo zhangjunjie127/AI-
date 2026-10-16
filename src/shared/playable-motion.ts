@@ -164,13 +164,16 @@ export function mountPlayableMotionElement(
       const previous = element.style.backgroundImage;
       const previousSize = element.style.backgroundSize;
       const previousPosition = element.style.backgroundPosition;
+      const previousRepeat = element.style.backgroundRepeat;
       element.style.backgroundImage = `url("${context.assets.url(assetId)}")`;
-      element.style.backgroundSize = "cover";
+      element.style.backgroundSize = "contain";
       element.style.backgroundPosition = "center";
+      element.style.backgroundRepeat = "no-repeat";
       cleanups.push(() => {
         element.style.backgroundImage = previous;
         element.style.backgroundSize = previousSize;
         element.style.backgroundPosition = previousPosition;
+        element.style.backgroundRepeat = previousRepeat;
       });
     } catch {
       // An undeclared button asset should not prevent the scene from mounting.

@@ -1352,8 +1352,9 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       );
       this.#motionAssetUrls.add(url);
       element.style.backgroundImage = `url("${url}")`;
-      element.style.backgroundSize = "cover";
+      element.style.backgroundSize = "contain";
       element.style.backgroundPosition = "center";
+      element.style.backgroundRepeat = "no-repeat";
     }
     const context =
       this.#motionContexts.get(element) ??

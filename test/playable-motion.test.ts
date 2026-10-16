@@ -64,6 +64,42 @@ it("keeps the existing button signal handler when an interactive motion is attac
   cleanup();
 });
 
+it("shows a replacement asset in full without changing the button hit area", () => {
+  const button = document.createElement("button");
+  button.style.width = "180px";
+  button.style.height = "48px";
+  button.style.backgroundSize = "cover";
+  button.style.backgroundPosition = "left top";
+  button.style.backgroundRepeat = "repeat";
+  button.setAttribute("data-putenggame-button-asset", "replacement");
+
+  const cleanup = mountPlayableMotionElement(button, {
+    root: document.createElement("div").attachShadow({ mode: "open" }),
+    assets: { url: (id: string) => `/assets/${id}.png` },
+    state: {} as never,
+    session: {} as never,
+    story: {} as never,
+    lifecycle: { signal: new AbortController().signal },
+    navigation: {
+      emit: async () => {},
+      back: async () => {},
+      connected: () => true,
+    },
+  });
+
+  expect(button.style.backgroundImage).toContain("/assets/replacement.png");
+  expect(button.style.backgroundSize).toBe("contain");
+  expect(button.style.backgroundPosition).toBe("center center");
+  expect(button.style.backgroundRepeat).toBe("no-repeat");
+  expect(button.style.width).toBe("180px");
+  expect(button.style.height).toBe("48px");
+
+  cleanup();
+  expect(button.style.backgroundSize).toBe("cover");
+  expect(button.style.backgroundPosition).toBe("left top");
+  expect(button.style.backgroundRepeat).toBe("repeat");
+});
+
 it("routes a completed hold to success and an untouched charge to timeout", () => {
   const callbacks: FrameRequestCallback[] = [];
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
