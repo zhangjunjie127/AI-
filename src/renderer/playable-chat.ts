@@ -50,7 +50,7 @@ export interface PlayableChatState {
 
 /** Picks are told apart by where they came from. */
 export function playablePickKey(pick: PlayablePickResult): string {
-  return `pick:${pick.nodeId}:${pick.source ?? ""}:${pick.cssPath}`;
+  return `pick:${pick.nodeId}:${pick.source ?? ""}:${pick.cssPath}:${pick.part ?? ""}:${pick.partId ?? ""}`;
 }
 
 /**

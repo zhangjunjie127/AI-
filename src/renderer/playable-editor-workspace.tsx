@@ -59,10 +59,14 @@ import {
   setPlayableElementTranslate,
 } from "../shared/playable-move.js";
 import {
+  insertPlayableButtonPreset,
   insertPlayableMotion,
+  insertPlayableMediaElement,
   PLAYABLE_BUTTON_ASSET_SCALE_MAX,
   PLAYABLE_BUTTON_ASSET_SCALE_MIN,
   PLAYABLE_MOTION_ATTRIBUTES,
+  playableContinueWithoutInput,
+  setPlayableContinueWithoutInput,
   setPlayableElementAttributes,
   type PlayableMotionConfig,
 } from "../shared/playable-motion.js";
@@ -88,6 +92,7 @@ import {
   insertPlayableElementCopies,
   insertPlayableText,
   removePlayableElement,
+  removePlayableTextPart,
   replacePlayableElementText,
 } from "../shared/playable-text-edit.js";
 import {
@@ -381,11 +386,13 @@ export function PlayableEditorWorkspace({
   const [backdrop, setBackdrop] = useState<"missing" | "set">();
   const [backdropType, setBackdropType] = useState<"image" | "video">();
   const [backdropLoop, setBackdropLoop] = useState(false);
+  const [continueWithoutInput, setContinueWithoutInput] = useState(false);
   const openedHtml = openedNode?.source.html;
   useEffect(() => {
     setBackdrop(undefined);
     setBackdropType(undefined);
     setBackdropLoop(false);
+    setContinueWithoutInput(false);
     if (!openedHtml) return;
     let disposed = false;
     void getWorkspaceFile(projectId, openedHtml).then(
@@ -400,10 +407,11 @@ export function PlayableEditorWorkspace({
             file.content !== undefined && !file.truncated
               ? file.content
               : undefined;
-          setBackdropType(
-            html ? playableBackdropAsset(html)?.type : undefined,
-          );
+          setBackdropType(html ? playableBackdropAsset(html)?.type : undefined);
           setBackdropLoop(html ? playableBackdropLoops(html) : false);
+          setContinueWithoutInput(
+            html ? playableContinueWithoutInput(html) : false,
+          );
         }
       },
       () => undefined,
@@ -1495,7 +1503,9 @@ export function PlayableEditorWorkspace({
     config: PlayableMotionConfig,
   ): Promise<{ id: string; source: string } | undefined> {
     const graph = codebase?.graph;
-    const node = graph?.nodes.find((candidate) => candidate.id === openedNodeId);
+    const node = graph?.nodes.find(
+      (candidate) => candidate.id === openedNodeId,
+    );
     if (!graph || !node) return undefined;
     const path = node.source.html;
     const file = await getWorkspaceFile(projectId, path);
@@ -1549,6 +1559,108 @@ export function PlayableEditorWorkspace({
       "替换按钮素材",
     );
     return withAsset.assetId;
+  }
+
+  async function setButtonPressedAsset(
+    pick: PlayablePickResult,
+    asset: PlayableAssetRequest,
+  ): Promise<string | undefined> {
+    const graph = latestCodebase.current?.graph;
+    const location = pick.source
+      ? parsePlayableSourceLocation(pick.source)
+      : undefined;
+    const node = graph?.nodes.find((candidate) => candidate.id === pick.nodeId);
+    if (
+      !graph ||
+      !location ||
+      !node ||
+      node.source.html !== location.file ||
+      pick.tag !== "button" ||
+      asset.type !== "image"
+    )
+      return undefined;
+    const file = await getWorkspaceFile(projectId, location.file);
+    const before = file.truncated ? undefined : file.content;
+    if (before === undefined) return undefined;
+    const declared = addPlayableNodeAsset(graph, node.id, asset);
+    const html = setPlayableElementAttributes(before, location, pick.tag, {
+      [PLAYABLE_MOTION_ATTRIBUTES.pressedAsset]: declared.assetId,
+    });
+    if (html === undefined) return undefined;
+    await writeSources(
+      declared.graph,
+      { [location.file]: html },
+      { [location.file]: before },
+      "设置按钮按下状态",
+    );
+    return declared.assetId;
+  }
+
+  async function insertMediaAsset(
+    nodeId: string,
+    asset: PlayableAssetRequest,
+  ): Promise<{ assetId: string; source: string } | undefined> {
+    const graph = latestCodebase.current?.graph;
+    const node = graph?.nodes.find((candidate) => candidate.id === nodeId);
+    if (!graph || !node || (asset.type !== "image" && asset.type !== "video"))
+      return undefined;
+    const path = node.source.html;
+    const file = await getWorkspaceFile(projectId, path);
+    const before = file.truncated ? undefined : file.content;
+    if (before === undefined) return undefined;
+    const declared = addPlayableNodeAsset(graph, nodeId, asset);
+    const inserted = insertPlayableMediaElement(
+      before,
+      path,
+      declared.assetId,
+      asset.type,
+      `putenggame-media-${Math.random().toString(36).slice(2, 10)}`,
+    );
+    if (!inserted) return undefined;
+    await writeSources(
+      declared.graph,
+      { [path]: inserted.html },
+      { [path]: before },
+      "添加素材到画面",
+    );
+    return { assetId: declared.assetId, source: inserted.source };
+  }
+
+  async function addButtonPreset(
+    nodeId: string,
+  ): Promise<{ id: string; source: string; signal: string; label: string } | undefined> {
+    const graph = latestCodebase.current?.graph;
+    const node = graph?.nodes.find((candidate) => candidate.id === nodeId);
+    if (!graph || !node) return undefined;
+    const usedSignals = new Set(node.signals.map((signal) => signal.id));
+    let index = 1;
+    while (usedSignals.has(`button-${index}`)) index += 1;
+    const signal = `button-${index}`;
+    const label = "新按钮";
+    const id = `putenggame-button-${Math.random().toString(36).slice(2, 10)}`;
+    const file = await getWorkspaceFile(projectId, node.source.html);
+    const before = file.truncated ? undefined : file.content;
+    if (before === undefined) return undefined;
+    const inserted = insertPlayableButtonPreset(
+      before,
+      node.source.html,
+      id,
+      signal,
+      label,
+    );
+    if (!inserted) return undefined;
+    const next = structuredClone(graph);
+    next.nodes.find((candidate) => candidate.id === nodeId)!.signals.push({
+      id: signal,
+      label,
+    });
+    await writeSources(
+      next,
+      { [node.source.html]: inserted.html },
+      { [node.source.html]: before },
+      "添加按钮预设",
+    );
+    return { id, source: inserted.source, signal, label };
   }
 
   async function writeAffectionConfig(
@@ -1667,15 +1779,10 @@ export function PlayableEditorWorkspace({
         : move.part === "button-label"
           ? move.pick.tag !== "button" || !move.pick.buttonAssetId
             ? undefined
-            : setPlayableElementAttributes(
-                before,
-                location,
-                "button",
-                {
-                  [PLAYABLE_MOTION_ATTRIBUTES.labelTranslate]:
-                    playableTranslateValue(move.translate),
-                },
-              )
+            : setPlayableElementAttributes(before, location, "button", {
+                [PLAYABLE_MOTION_ATTRIBUTES.labelTranslate]:
+                  playableTranslateValue(move.translate),
+              })
           : setPlayableElementTranslate(
               before,
               location,
@@ -1750,7 +1857,16 @@ export function PlayableEditorWorkspace({
     const file = await getWorkspaceFile(projectId, location.file);
     const before = file.truncated ? undefined : file.content;
     if (before === undefined) return false;
-    const html = removePlayableElement(before, location, edit.pick.tag);
+    const html =
+      edit.part === "button-label"
+        ? removePlayableTextPart(
+            before,
+            location,
+            edit.pick.tag,
+            edit.pick.text,
+            edit.pick.sourceText,
+          )
+        : removePlayableElement(before, location, edit.pick.tag);
     if (html === undefined) return false;
     await writeSources(
       graph,
@@ -1837,6 +1953,30 @@ export function PlayableEditorWorkspace({
         "设置背景视频播放方式",
       );
     setBackdropLoop(loop);
+    return true;
+  }
+
+  async function writeContinueWithoutInput(
+    nodeId: string,
+    enabled: boolean,
+  ): Promise<boolean> {
+    const graph = codebase?.graph;
+    const node = graph?.nodes.find((candidate) => candidate.id === nodeId);
+    if (!graph || !node) return false;
+    const path = node.source.html;
+    const file = await getWorkspaceFile(projectId, path);
+    if (file.content === undefined || file.truncated) return false;
+    const before = file.content;
+    const html = setPlayableContinueWithoutInput(before, enabled);
+    if (html === undefined) return false;
+    if (html !== before)
+      await writeSources(
+        graph,
+        { [path]: html },
+        { [path]: before },
+        "设置未操作时的剧情处理",
+      );
+    setContinueWithoutInput(enabled);
     return true;
   }
 
@@ -2586,6 +2726,9 @@ export function PlayableEditorWorkspace({
           onWriteMotion={writeMotion}
           onCreateMotion={createMotion}
           onReplaceButtonAsset={replaceButtonAsset}
+          onSetButtonPressedAsset={setButtonPressedAsset}
+          onInsertMediaAsset={(asset) => insertMediaAsset(openedNode.id, asset)}
+          onAddButtonPreset={() => addButtonPreset(openedNode.id)}
           onWriteButtonAssetScale={writeButtonAssetScale}
           onWriteMove={writeMove}
           onWriteTransform={writeTransform}
@@ -2604,12 +2747,14 @@ export function PlayableEditorWorkspace({
           }}
           onSetBackdrop={(asset) => writeBackdrop(openedNode.id, asset)}
           onRemoveBackdrop={() => removeBackdrop(openedNode.id)}
-          onWriteBackdropLoop={(loop) =>
-            writeBackdropLoop(openedNode.id, loop)
+          onWriteBackdropLoop={(loop) => writeBackdropLoop(openedNode.id, loop)}
+          onWriteContinueWithoutInput={(enabled) =>
+            writeContinueWithoutInput(openedNode.id, enabled)
           }
           {...(backdrop ? { backdrop } : {})}
           {...(backdropType ? { backdropType } : {})}
           backdropLoop={backdropLoop}
+          continueWithoutInput={continueWithoutInput}
           backdropEffects={backdropEffects}
           onPlayFromHere={(start) => void startPlaytest(start)}
           onChatContextChange={onChatContextChange}

@@ -78,7 +78,7 @@ export interface NodePlayerProps {
   preserveMediaState?: PlayableMediaState;
   backdropEffects?: PlayableBackdropEffects;
   /** Removes the currently selected element without rebuilding the preview. */
-  deleteCommand?: PlayablePickResult;
+  deleteCommand?: { sequence: number; picks: PlayablePickResult[] };
   /** Updates timed elements in the active preview without rebuilding it. */
   appearanceTimingCommand?: PlayableAppearanceTimingCommand;
   onAppearanceTimingCommandApplied?: (sequence: number) => void;
@@ -333,13 +333,21 @@ export function NodePlayer({
       return;
     }
     if (mediaCommand) {
+      const bytes =
+        mediaCommand.command === "insert-media"
+          ? mediaCommand.asset.bytes.slice(0)
+          : undefined;
       iframe.current?.contentWindow?.postMessage(
         {
           kind: "putenggame:playable:media-command",
           instanceId,
-          command: mediaCommand,
+          command:
+            bytes && mediaCommand.command === "insert-media"
+              ? { ...mediaCommand, asset: { ...mediaCommand.asset, bytes } }
+              : mediaCommand,
         },
         "*",
+        bytes ? [bytes] : [],
       );
     }
   }, [instanceId, mediaCommandKey, ready]);
@@ -347,14 +355,15 @@ export function NodePlayer({
   const deleteCommandKey = JSON.stringify(deleteCommand ?? null);
   useEffect(() => {
     if (!ready || !deleteCommand) return;
-    iframe.current?.contentWindow?.postMessage(
-      {
-        kind: "putenggame:playable:delete-element",
-        instanceId,
-        pick: deleteCommand,
-      },
-      "*",
-    );
+    for (const pick of deleteCommand.picks)
+      iframe.current?.contentWindow?.postMessage(
+        {
+          kind: "putenggame:playable:delete-element",
+          instanceId,
+          pick,
+        },
+        "*",
+      );
   }, [deleteCommandKey, instanceId, ready]);
 
   const appearanceTimingCommandKey = JSON.stringify(
@@ -395,16 +404,38 @@ export function NodePlayer({
     )
       return;
     const bytes = motionCommand.asset?.bytes.slice(0);
+    const pressedBytes = motionCommand.pressedAsset?.bytes.slice(0);
     iframe.current?.contentWindow?.postMessage(
       {
         kind: "putenggame:playable:motion",
         instanceId,
         command: bytes
-          ? { ...motionCommand, asset: { ...motionCommand.asset!, bytes } }
-          : motionCommand,
+          ? {
+              ...motionCommand,
+              asset: { ...motionCommand.asset!, bytes },
+              ...(pressedBytes
+                ? {
+                    pressedAsset: {
+                      ...motionCommand.pressedAsset!,
+                      bytes: pressedBytes,
+                    },
+                  }
+                : {}),
+            }
+          : pressedBytes
+            ? {
+                ...motionCommand,
+                pressedAsset: {
+                  ...motionCommand.pressedAsset!,
+                  bytes: pressedBytes,
+                },
+              }
+            : motionCommand,
       },
       "*",
-      bytes ? [bytes] : [],
+      [bytes, pressedBytes].filter(
+        (item): item is ArrayBuffer => item !== undefined,
+      ),
     );
     appliedMotionSequence.current = motionCommand.sequence;
   }, [instanceId, motionCommand, ready]);

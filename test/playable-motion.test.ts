@@ -1,15 +1,22 @@
 // @vitest-environment happy-dom
 import { expect, it, vi } from "vitest";
 import {
+  insertPlayableButtonPreset,
   insertPlayableMotion,
+  insertPlayableMediaElement,
   mountPlayableMotionElement,
+  playableContinueWithoutInput,
   playableButtonAssetScales,
+  playableElementRuntimeScale,
+  playableElementTransformScale,
   setPlayableElementAttributes,
+  setPlayableContinueWithoutInput,
   updatePlayableButtonLabelScale,
 } from "../src/shared/playable-motion.js";
 
 it("updates only attributes on the source element and preserves its other markup", () => {
-  const source = '<main>\n  <button data-signal="continue" style="color: red">Next</button>\n</main>';
+  const source =
+    '<main>\n  <button data-signal="continue" style="color: red">Next</button>\n</main>';
   const updated = setPlayableElementAttributes(
     source,
     { line: 2, column: 3 },
@@ -24,12 +31,9 @@ it("updates only attributes on the source element and preserves its other markup
     '<button data-signal="continue" style="color: red" data-putenggame-motion="progress-ring" data-putenggame-motion-signal="success &quot;now&quot;">',
   );
   expect(
-    setPlayableElementAttributes(
-      source,
-      { line: 2, column: 3 },
-      "div",
-      { "data-putenggame-motion": "countdown" },
-    ),
+    setPlayableElementAttributes(source, { line: 2, column: 3 }, "div", {
+      "data-putenggame-motion": "countdown",
+    }),
   ).toBeUndefined();
 });
 
@@ -54,12 +58,15 @@ it("keeps the existing button signal handler when an interactive motion is attac
     lifecycle: { signal: new AbortController().signal },
     navigation: {
       emit,
+      fail: emit,
       back: async () => {},
       connected: () => true,
     },
   });
 
-  button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  button.dispatchEvent(
+    new MouseEvent("click", { bubbles: true, cancelable: true }),
+  );
 
   expect(existingClick).toHaveBeenCalledOnce();
   expect(emit).not.toHaveBeenCalled();
@@ -77,10 +84,7 @@ it("scales the replacement image and button hit area together without cropping",
   button.setAttribute("data-putenggame-button-asset", "replacement");
   button.setAttribute("data-putenggame-button-asset-scale-x", "150");
   button.setAttribute("data-putenggame-button-asset-scale-y", "80");
-  button.setAttribute(
-    "data-putenggame-button-label-translate",
-    "4cqw -2cqh",
-  );
+  button.setAttribute("data-putenggame-button-label-translate", "4cqw -2cqh");
 
   const cleanup = mountPlayableMotionElement(button, {
     root: document.createElement("div").attachShadow({ mode: "open" }),
@@ -91,6 +95,7 @@ it("scales the replacement image and button hit area together without cropping",
     lifecycle: { signal: new AbortController().signal },
     navigation: {
       emit: async () => {},
+      fail: async () => {},
       back: async () => {},
       connected: () => true,
     },
@@ -124,7 +129,9 @@ it("scales the replacement image and button hit area together without cropping",
   expect(click).toHaveBeenCalledOnce();
 
   cleanup();
-  expect(button.querySelector("[data-putenggame-button-asset-image]")).toBeNull();
+  expect(
+    button.querySelector("[data-putenggame-button-asset-image]"),
+  ).toBeNull();
   expect(button.querySelector("[data-putenggame-button-label]")).toBeNull();
   expect(button.textContent).toBe("Continue");
   expect(button.style.backgroundImage).toContain("original.png");
@@ -133,8 +140,129 @@ it("scales the replacement image and button hit area together without cropping",
   expect(button.style.position).toBe("absolute");
 });
 
+it("swaps the normal button image for the pressed image while held", () => {
+  const button = document.createElement("button");
+  button.textContent = "开始";
+  button.style.transition = "transform 180ms ease";
+  button.setAttribute("data-putenggame-button-asset", "normal");
+  button.setAttribute("data-putenggame-button-pressed-asset", "pressed");
+  const click = vi.fn();
+  button.addEventListener("click", click);
+  const cleanup = mountPlayableMotionElement(button, {
+    root: document.createElement("div").attachShadow({ mode: "open" }),
+    assets: { url: (id: string) => `/assets/${id}.png` },
+    state: {} as never,
+    session: {} as never,
+    story: {} as never,
+    lifecycle: { signal: new AbortController().signal },
+    navigation: {
+      emit: async () => {},
+      fail: async () => {},
+      back: async () => {},
+      connected: () => true,
+    },
+  });
+
+  const pressed = button.querySelector<HTMLElement>(
+    "[data-putenggame-button-pressed-image]",
+  )!;
+  const normal = button.querySelector<HTMLElement>(
+    "[data-putenggame-button-asset-image]",
+  )!;
+  expect(pressed.style.visibility).toBe("hidden");
+  expect(normal.style.visibility).toBe("visible");
+  expect(button.style.scale).toBe("1 1");
+  button.dispatchEvent(
+    new PointerEvent("pointerenter", {
+      bubbles: true,
+      pointerType: "mouse",
+    }),
+  );
+  expect(pressed.style.visibility).toBe("visible");
+  expect(normal.style.visibility).toBe("hidden");
+  expect(button.style.scale).toBe("1 1");
+  button.dispatchEvent(
+    new PointerEvent("pointerleave", {
+      bubbles: true,
+      pointerType: "mouse",
+    }),
+  );
+  expect(pressed.style.visibility).toBe("hidden");
+  expect(normal.style.visibility).toBe("visible");
+  button.dispatchEvent(
+    new PointerEvent("pointerenter", {
+      bubbles: true,
+      pointerType: "mouse",
+    }),
+  );
+  button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  button.dispatchEvent(
+    new PointerEvent("pointerleave", {
+      bubbles: true,
+      pointerType: "mouse",
+    }),
+  );
+  expect(pressed.style.visibility).toBe("visible");
+  expect(button.style.scale).toBe("1.08 1.08");
+  window.dispatchEvent(new PointerEvent("pointerup"));
+  expect(pressed.style.visibility).toBe("hidden");
+  expect(normal.style.visibility).toBe("visible");
+  expect(button.style.scale).toBe("1 1");
+  expect(button.style.transition).toContain("transform 180ms ease");
+  expect(button.style.transition).toContain("scale 120ms ease");
+  button.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+  );
+  expect(pressed.style.visibility).toBe("visible");
+  expect(normal.style.visibility).toBe("hidden");
+  expect(button.style.scale).toBe("1.08 1.08");
+  button.dispatchEvent(
+    new KeyboardEvent("keyup", { key: "Enter", bubbles: true }),
+  );
+  expect(pressed.style.visibility).toBe("hidden");
+  expect(normal.style.visibility).toBe("visible");
+  expect(button.style.scale).toBe("1 1");
+  button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  expect(pressed.style.visibility).toBe("visible");
+  expect(normal.style.visibility).toBe("hidden");
+  window.dispatchEvent(new PointerEvent("pointerup"));
+  expect(pressed.style.visibility).toBe("hidden");
+  expect(normal.style.visibility).toBe("visible");
+  button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  expect(click).toHaveBeenCalledOnce();
+  expect(button.textContent).toBe("开始");
+  cleanup();
+});
+
+it("hides and restores the original background when only a pressed asset is set", () => {
+  const button = document.createElement("button");
+  button.style.backgroundImage = 'url("default.png")';
+  button.setAttribute("data-putenggame-button-pressed-asset", "pressed");
+  const cleanup = mountPlayableMotionElement(button, {
+    root: document.createElement("div").attachShadow({ mode: "open" }),
+    assets: { url: (id: string) => `/assets/${id}.png` },
+    state: {} as never,
+    session: {} as never,
+    story: {} as never,
+    lifecycle: { signal: new AbortController().signal },
+    navigation: {
+      emit: async () => {},
+      fail: async () => {},
+      back: async () => {},
+      connected: () => true,
+    },
+  });
+
+  button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  expect(button.style.backgroundImage).toBe("none");
+  window.dispatchEvent(new PointerEvent("pointerup"));
+  expect(button.style.backgroundImage).toContain("default.png");
+  cleanup();
+});
+
 it("saves button label movement on its own attribute, not on the button", () => {
-  const source = '<main>\n  <button style="color: red">Continue</button>\n</main>';
+  const source =
+    '<main>\n  <button style="color: red">Continue</button>\n</main>';
   const updated = setPlayableElementAttributes(
     source,
     { line: 2, column: 3 },
@@ -157,6 +285,34 @@ it("uses the previous single scale value for scenes without axis-specific scales
   expect(playableButtonAssetScales(button)).toEqual({ x: 240, y: 175 });
 });
 
+it("composes button frame scaling with the background-asset scaling", () => {
+  const button = document.createElement("button");
+  button.style.scale = "1.5";
+  button.setAttribute("data-putenggame-button-asset", "normal");
+  button.setAttribute("data-putenggame-button-asset-scale-x", "150");
+  button.setAttribute("data-putenggame-button-asset-scale-y", "80");
+  expect(playableElementTransformScale(button, "2.25 1.2")).toBe(1.5);
+  expect(playableElementRuntimeScale(button, 1.5)).toBe("2.25 1.2");
+
+  const cleanup = mountPlayableMotionElement(button, {
+    root: document.createElement("div").attachShadow({ mode: "open" }),
+    assets: { url: (id: string) => `/assets/${id}.png` },
+    state: {} as never,
+    session: {} as never,
+    story: {} as never,
+    lifecycle: { signal: new AbortController().signal },
+    navigation: {
+      emit: async () => {},
+      fail: async () => {},
+      back: async () => {},
+      connected: () => true,
+    },
+  });
+  expect(button.style.scale).toBe("2.25 1.2");
+  cleanup();
+  expect(button.style.scale).toBe("1.5");
+});
+
 it("routes a completed hold to success and an untouched charge to timeout", () => {
   const callbacks: FrameRequestCallback[] = [];
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
@@ -172,7 +328,7 @@ it("routes a completed hold to success and an untouched charge to timeout", () =
       session: {} as never,
       story: {} as never,
       lifecycle: { signal: new AbortController().signal },
-      navigation: { emit, back: async () => {}, connected: () => true },
+      navigation: { emit, fail: emit, back: async () => {}, connected: () => true },
     }) as never;
   const success = vi.fn(async () => {});
   const held = document.createElement("button");
@@ -204,9 +360,49 @@ it("routes a completed hold to success and an untouched charge to timeout", () =
   vi.restoreAllMocks();
 });
 
+it("reports interactive motion timeouts through the failure navigation path", () => {
+  const callbacks: FrameRequestCallback[] = [];
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    callbacks.push(callback);
+    return callbacks.length;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+  const emit = vi.fn(async () => {});
+  const fail = vi.fn(async () => {});
+  const root = document.createElement("div").attachShadow({ mode: "open" });
+  root.innerHTML =
+    '<main data-putenggame-continue-without-input="true"></main>';
+  const button = document.createElement("button");
+  for (const [name, value] of Object.entries({
+    "data-putenggame-motion": "countdown",
+    "data-putenggame-motion-mode": "interactive",
+    "data-putenggame-motion-duration": "1",
+    "data-putenggame-motion-timeout": "fail",
+  }))
+    button.setAttribute(name, value);
+  const cleanup = mountPlayableMotionElement(
+    button,
+    {
+      root,
+      assets: { url: () => "" },
+      state: {} as never,
+      session: {} as never,
+      story: {} as never,
+      lifecycle: { signal: new AbortController().signal },
+      navigation: { emit, fail, back: async () => {}, connected: () => true },
+    } as never,
+  );
+
+  callbacks.shift()!(window.performance.now() + 1100);
+  expect(emit).not.toHaveBeenCalled();
+  expect(fail).toHaveBeenCalledWith("fail");
+  cleanup();
+  vi.restoreAllMocks();
+});
+
 it("inserts an independent motion element with a stable source location", () => {
   const inserted = insertPlayableMotion(
-    "<main class=\"stage\">\n</main>",
+    '<main class="stage">\n</main>',
     "nodes/start/index.html",
     {
       kind: "hold-charge",
@@ -222,4 +418,63 @@ it("inserts an independent motion element with a stable source location", () => 
     'data-putenggame-motion="hold-charge" data-putenggame-motion-mode="interactive"',
   );
   expect(inserted?.source).toBe("nodes/start/index.html:2:1");
+});
+
+it("stores the node no-input option on the scene root and preserves other markup", () => {
+  const html = '<main class="stage"><button>Go</button></main>';
+  const enabled = setPlayableContinueWithoutInput(html, true)!;
+  expect(playableContinueWithoutInput(enabled)).toBe(true);
+  expect(enabled).toContain('<main class="stage" data-putenggame-continue-without-input="true">');
+  expect(setPlayableContinueWithoutInput(enabled, false)).toBe(html);
+  expect(playableContinueWithoutInput(html)).toBe(false);
+});
+
+it("inserts source-backed image and video assets into the Scene markup", () => {
+  const image = insertPlayableMediaElement(
+    '<main class="stage">\n</main>',
+    "nodes/start/index.html",
+    "portrait",
+    "image",
+    "putenggame-media-image",
+  );
+  const video = insertPlayableMediaElement(
+    "<main>\n</main>",
+    "nodes/start/index.html",
+    "clip",
+    "video",
+    "putenggame-media-video",
+  );
+
+  expect(image?.html).toContain(
+    'id="putenggame-media-image" data-putenggame-asset="portrait"',
+  );
+  expect(image?.source).toBe("nodes/start/index.html:2:1");
+  expect(video?.html).toContain(
+    'data-putenggame-asset="clip" autoplay muted loop playsinline',
+  );
+  expect(video?.source).toBe("nodes/start/index.html:2:1");
+});
+
+it("inserts a source-backed button preset with an independently connectable signal", () => {
+  const inserted = insertPlayableButtonPreset(
+    '<main class="stage">\n</main>',
+    "nodes/start/index.html",
+    "putenggame-button-new",
+    "button-1",
+    "新按钮",
+  );
+
+  expect(inserted?.html).toContain(
+    'id="putenggame-button-new" type="button" data-signal="button-1" data-putenggame-button-preset',
+  );
+  expect(inserted?.source).toBe("nodes/start/index.html:2:1");
+  expect(
+    insertPlayableButtonPreset(
+      "<main></main>",
+      "nodes/start/index.html",
+      "putenggame-button-invalid",
+      "not a signal",
+      "Button",
+    ),
+  ).toBeUndefined();
 });

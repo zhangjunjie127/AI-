@@ -110,6 +110,7 @@ import {
   type PlayableMotionConfig,
   type PlayableMotionKind,
 } from "../shared/playable-motion.js";
+import { parsePlayableSourceLocation } from "../shared/playable-text-edit.js";
 
 const ASSET_UPLOAD_ACCEPT = ".png,.jpg,.jpeg,.webp,.mp4,.mov,.webm";
 const TOAST_LIMIT = 3;
@@ -208,6 +209,9 @@ export function PlayableNodeWorkbench({
   onWriteMotion,
   onCreateMotion,
   onReplaceButtonAsset,
+  onSetButtonPressedAsset,
+  onInsertMediaAsset,
+  onAddButtonPreset,
   onWriteButtonAssetScale,
   onWriteMove,
   onWriteTransform,
@@ -217,9 +221,11 @@ export function PlayableNodeWorkbench({
   onSetBackdrop,
   onRemoveBackdrop,
   onWriteBackdropLoop,
+  onWriteContinueWithoutInput,
   backdrop,
   backdropType,
   backdropLoop,
+  continueWithoutInput,
   backdropEffects,
   onPlayFromHere,
   onChatContextChange,
@@ -266,6 +272,16 @@ export function PlayableNodeWorkbench({
     pick: PlayablePickResult,
     asset: PlayableAssetRequest,
   ) => Promise<string | undefined>;
+  onSetButtonPressedAsset: (
+    pick: PlayablePickResult,
+    asset: PlayableAssetRequest,
+  ) => Promise<string | undefined>;
+  onInsertMediaAsset: (
+    asset: PlayableAssetRequest,
+  ) => Promise<{ assetId: string; source: string } | undefined>;
+  onAddButtonPreset: () => Promise<
+    { id: string; source: string; signal: string; label: string } | undefined
+  >;
   onWriteButtonAssetScale: (
     pick: PlayablePickResult,
     scaleX: number,
@@ -292,10 +308,12 @@ export function PlayableNodeWorkbench({
   onRemoveBackdrop?: () => Promise<boolean>;
   /** Persists this Node's background-video loop preference. */
   onWriteBackdropLoop: (loop: boolean) => Promise<boolean>;
+  onWriteContinueWithoutInput: (enabled: boolean) => Promise<boolean>;
   /** Whether the Scene's background shows anything yet; unset when the editor cannot set it. */
   backdrop?: "missing" | "set";
   backdropType?: "image" | "video";
   backdropLoop: boolean;
+  continueWithoutInput: boolean;
   backdropEffects: PlayableBackdropEffects;
   /** Opens a Playtest that starts at this Scene. */
   onPlayFromHere?: (start: PlaytestStart) => void;
@@ -344,7 +362,11 @@ export function PlayableNodeWorkbench({
     };
   }, [projectId, node.source.html, revision]);
   const [session, setSession] = useState(0);
-  const [deleteCommand, setDeleteCommand] = useState<PlayablePickResult>();
+  const [deleteCommand, setDeleteCommand] = useState<{
+    sequence: number;
+    picks: PlayablePickResult[];
+  }>();
+  const deleteSequence = useRef(0);
   const [appearanceTimingCommand, setAppearanceTimingCommand] =
     useState<PlayableAppearanceTimingCommand>();
   const appearanceTimingSequence = useRef(0);
@@ -401,6 +423,7 @@ export function PlayableNodeWorkbench({
   useEffect(() => {
     if (tool !== "text") setTextSelection(undefined);
     if (tool !== "select") setInteractionSelections([]);
+    if (tool !== "select") setPicks([]);
   }, [tool]);
 
   // Esc puts the pointer back to playing. The preview frame reports its own Esc.
@@ -798,6 +821,9 @@ export function PlayableNodeWorkbench({
                 assetScaleY: pick.buttonAssetScaleY ?? 100,
               }
             : {}),
+          ...(pick.buttonPressedAssetId
+            ? { pressedAssetId: pick.buttonPressedAssetId }
+            : {}),
         });
       } catch (cause) {
         releaseRefreshSkip();
@@ -844,10 +870,16 @@ export function PlayableNodeWorkbench({
               assetScaleY: pick.buttonAssetScaleY ?? 100,
             }
           : {}),
+        ...(pick.buttonPressedAssetId
+          ? { pressedAssetId: pick.buttonPressedAssetId }
+          : {}),
       });
     } catch (cause) {
       releaseRefreshSkip();
-      showToast({ tone: "error", text: `无法移除动效：${errorMessage(cause)}` });
+      showToast({
+        tone: "error",
+        text: `无法移除动效：${errorMessage(cause)}`,
+      });
     }
   }, [onWriteMotion, picks, reserveRuntimeRefreshSkip, showToast]);
 
@@ -874,6 +906,9 @@ export function PlayableNodeWorkbench({
           target: { kind: "element", pick },
           ...(pick.motion ? { config: pick.motion } : {}),
           assetId,
+          ...(pick.buttonPressedAssetId
+            ? { pressedAssetId: pick.buttonPressedAssetId }
+            : {}),
           assetScaleX: 100,
           assetScaleY: 100,
           asset: {
@@ -901,13 +936,85 @@ export function PlayableNodeWorkbench({
         });
       }
     },
-    [
-      onReplaceButtonAsset,
-      picks,
-      reserveRuntimeRefreshSkip,
-      showToast,
-    ],
+    [onReplaceButtonAsset, picks, reserveRuntimeRefreshSkip, showToast],
   );
+
+  const onSetSelectedButtonPressedAsset = useCallback(
+    async (asset: PlayableAssetRequest) => {
+      const pick = picks.at(-1);
+      if (pick?.tag !== "button" || !pick.source || asset.type !== "image") {
+        showToast({
+          tone: "error",
+          text: "请先选择一个按钮，再设置按下状态图片",
+        });
+        return;
+      }
+      const releaseRefreshSkip = reserveRuntimeRefreshSkip();
+      try {
+        const assetId = await onSetButtonPressedAsset(pick, asset);
+        if (!assetId) {
+          releaseRefreshSkip();
+          showToast({ tone: "error", text: "无法设置按钮按下状态图片" });
+          return;
+        }
+        const blob = await getLibraryAsset(
+          asset.source.kind === "library" ? asset.source.assetId : asset.name,
+        );
+        setMotionCommand({
+          sequence: ++motionSequence.current,
+          target: { kind: "element", pick },
+          ...(pick.motion ? { config: pick.motion } : {}),
+          ...(pick.buttonAssetId ? { assetId: pick.buttonAssetId } : {}),
+          assetScaleX: pick.buttonAssetScaleX ?? 100,
+          assetScaleY: pick.buttonAssetScaleY ?? 100,
+          pressedAssetId: assetId,
+          pressedAsset: {
+            contentType: blob.type || "application/octet-stream",
+            bytes: await blob.arrayBuffer(),
+          },
+        });
+        setPicks((current) =>
+          current.map((item) =>
+            playablePickKey(item) === playablePickKey(pick)
+              ? { ...item, buttonPressedAssetId: assetId }
+              : item,
+          ),
+        );
+      } catch (cause) {
+        releaseRefreshSkip();
+        showToast({
+          tone: "error",
+          text: `无法设置按钮按下状态图片：${errorMessage(cause)}`,
+        });
+      }
+    },
+    [onSetButtonPressedAsset, picks, reserveRuntimeRefreshSkip, showToast],
+  );
+
+  const addButtonPreset = useCallback(async () => {
+    const releaseRefreshSkip = reserveRuntimeRefreshSkip();
+    try {
+      const preset = await onAddButtonPreset();
+      if (!preset) {
+        releaseRefreshSkip();
+        showToast({ tone: "error", text: "无法添加按钮预设" });
+        return;
+      }
+      setMediaCommand({
+        command: "insert-button-preset",
+        nodeId: node.id,
+        ...preset,
+      });
+      setTool("select");
+      showToast({ tone: "info", text: "按钮已添加，可选择素材和动效" });
+    } catch (cause) {
+      releaseRefreshSkip();
+      showToast({
+        tone: "error",
+        text: `无法添加按钮预设：${errorMessage(cause)}`,
+      });
+    }
+  }, [node.id, onAddButtonPreset, reserveRuntimeRefreshSkip, showToast]);
 
   const previewButtonAssetScale = useCallback(
     (pick: PlayablePickResult, scaleX: number, scaleY: number) => {
@@ -1056,36 +1163,61 @@ export function PlayableNodeWorkbench({
   );
 
   const deleteSelected = useCallback(() => {
-    const pick = picks.at(-1);
-    if (!pick) return;
+    if (!picks.length) return;
+    const selected = [...picks].sort((first, second) => {
+      const firstLocation = first.source
+        ? parsePlayableSourceLocation(first.source)
+        : undefined;
+      const secondLocation = second.source
+        ? parsePlayableSourceLocation(second.source)
+        : undefined;
+      return (
+        (secondLocation?.line ?? 0) - (firstLocation?.line ?? 0) ||
+        (secondLocation?.column ?? 0) - (firstLocation?.column ?? 0) ||
+        Number(second.part === "button-label") -
+          Number(first.part === "button-label")
+      );
+    });
     void (async () => {
-      let releaseRefreshSkip: (() => void) | undefined;
-      try {
-        releaseRefreshSkip = reserveRuntimeRefreshSkip();
-        if (!(await onWriteDelete({ pick, inPlace: true }))) {
+      const deleted: PlayablePickResult[] = [];
+      for (const pick of selected) {
+        const releaseRefreshSkip = reserveRuntimeRefreshSkip();
+        try {
+          const written = await onWriteDelete({
+            pick,
+            ...(pick.part ? { part: pick.part } : {}),
+            inPlace: true,
+          });
+          if (written) deleted.push(pick);
+          else releaseRefreshSkip();
+        } catch {
           releaseRefreshSkip();
-          showToast({ tone: "error", text: "此元素无法直接删除" });
-          return;
         }
-        setDeleteCommand(pick);
+      }
+      if (deleted.length) {
+        const deletedKeys = new Set(deleted.map(playablePickKey));
+        setDeleteCommand({
+          sequence: ++deleteSequence.current,
+          picks: deleted,
+        });
         setPicks((current) =>
           current.filter(
-            (candidate) => playablePickKey(candidate) !== playablePickKey(pick),
+            (candidate) => !deletedKeys.has(playablePickKey(candidate)),
           ),
         );
         setInteractionSelections((current) =>
           current.filter(
-            (selection) =>
-              playablePickKey(selection.pick) !== playablePickKey(pick),
+            (selection) => !deletedKeys.has(playablePickKey(selection.pick)),
           ),
         );
-      } catch (cause) {
-        releaseRefreshSkip?.();
+      }
+      if (deleted.length !== selected.length)
         showToast({
           tone: "error",
-          text: `无法删除元素：${errorMessage(cause)}`,
+          text: deleted.length
+            ? "Some selected items could not be deleted directly."
+            : "Selected items could not be deleted directly.",
         });
-      }
     })();
   }, [onWriteDelete, picks, reserveRuntimeRefreshSkip, showToast]);
 
@@ -1100,6 +1232,46 @@ export function PlayableNodeWorkbench({
         if (target === "button") {
           await onReplaceSelectedButton(asset);
           return;
+        }
+        if (target === "button-pressed") {
+          await onSetSelectedButtonPressedAsset(asset);
+          return;
+        }
+        if (target === "canvas") {
+          if (asset.type !== "image" && asset.type !== "video") return;
+          const releaseRefreshSkip = reserveRuntimeRefreshSkip();
+          try {
+            const inserted = await onInsertMediaAsset(asset);
+            if (!inserted) {
+              releaseRefreshSkip();
+              showToast({ tone: "error", text: "无法将素材添加到画面" });
+              return;
+            }
+            const blob = await getLibraryAsset(
+              asset.source.kind === "library"
+                ? asset.source.assetId
+                : asset.name,
+            );
+            setMediaCommand({
+              command: "insert-media",
+              nodeId: node.id,
+              source: inserted.source,
+              assetId: inserted.assetId,
+              type: asset.type,
+              asset: {
+                contentType: blob.type || "application/octet-stream",
+                bytes: await blob.arrayBuffer(),
+              },
+            });
+            return;
+          } catch (cause) {
+            releaseRefreshSkip();
+            showToast({
+              tone: "error",
+              text: `无法添加素材：${errorMessage(cause)}`,
+            });
+            return;
+          }
         }
         if (
           target === "backdrop" &&
@@ -1126,7 +1298,16 @@ export function PlayableNodeWorkbench({
         });
       }
     },
-    [onAddAsset, onReplaceSelectedButton, onSetBackdrop, showToast],
+    [
+      node.id,
+      onAddAsset,
+      onInsertMediaAsset,
+      onReplaceSelectedButton,
+      onSetBackdrop,
+      onSetSelectedButtonPressedAsset,
+      reserveRuntimeRefreshSkip,
+      showToast,
+    ],
   );
 
   const removeBackdrop = useCallback(async () => {
@@ -1171,6 +1352,34 @@ export function PlayableNodeWorkbench({
     [onWriteBackdropLoop, reserveRuntimeRefreshSkip, showToast],
   );
 
+  const writeContinueWithoutInput = useCallback(
+    async (enabled: boolean) => {
+      const releaseRefreshSkip = reserveRuntimeRefreshSkip();
+      try {
+        if (!(await onWriteContinueWithoutInput(enabled))) {
+          releaseRefreshSkip();
+          showToast({
+            tone: "error",
+            text: "Could not save the no-input behavior",
+          });
+          return;
+        }
+        setMediaCommand({
+          command: "continue-without-input",
+          nodeId: node.id,
+          enabled,
+        });
+      } catch {
+        releaseRefreshSkip();
+        showToast({
+          tone: "error",
+          text: "Could not save the no-input behavior",
+        });
+      }
+    },
+    [node.id, onWriteContinueWithoutInput, reserveRuntimeRefreshSkip, showToast],
+  );
+
   const preview: PlayablePreviewOptions = {
     policy: "report",
     startNodeId: node.id,
@@ -1195,8 +1404,7 @@ export function PlayableNodeWorkbench({
       node.signals.filter((signal) =>
         graph.edges.some(
           (edge) =>
-            edge.source.nodeId === node.id &&
-            edge.source.signal === signal.id,
+            edge.source.nodeId === node.id && edge.source.signal === signal.id,
         ),
       ),
     [graph.edges, node.id, node.signals],
@@ -1339,10 +1547,20 @@ export function PlayableNodeWorkbench({
                   backdrop === "set" && backdropType === "video"
                 }
                 backdropLoop={backdropLoop}
-                canReplaceButton={tool === "select" && picks.at(-1)?.tag === "button"}
+                continueWithoutInput={continueWithoutInput}
+                canReplaceButton={
+                  tool === "select" && picks.at(-1)?.tag === "button"
+                }
+                canSetButtonPressed={
+                  tool === "select" && picks.at(-1)?.tag === "button"
+                }
                 onChoose={chooser.choose}
+                onAddButtonPreset={() => void addButtonPreset()}
                 onRemoveBackdrop={() => void removeBackdrop()}
                 onBackdropLoopChange={(loop) => void writeBackdropLoop(loop)}
+                onContinueWithoutInputChange={(enabled) =>
+                  void writeContinueWithoutInput(enabled)
+                }
               />
             }
           />
@@ -1396,9 +1614,7 @@ export function PlayableNodeWorkbench({
           onPasteElements={onPasteElements}
           onHistoryCommand={onHistoryCommand}
           elementClipboardCommand={elementClipboardCommand}
-          onElementClipboardCommandApplied={
-            onElementClipboardCommandApplied
-          }
+          onElementClipboardCommandApplied={onElementClipboardCommandApplied}
           onMediaState={setMediaState}
           mediaCommand={mediaCommand}
           onPickCancel={onPickCancel}
@@ -1589,7 +1805,10 @@ export function PreviewToolbar({
     : "";
   const [assetScaleXDraft, setAssetScaleXDraft] = useState(savedAssetScaleX);
   const [assetScaleYDraft, setAssetScaleYDraft] = useState(savedAssetScaleY);
-  const assetScaleCommitted = useRef({ x: savedAssetScaleX, y: savedAssetScaleY });
+  const assetScaleCommitted = useRef({
+    x: savedAssetScaleX,
+    y: savedAssetScaleY,
+  });
   useEffect(() => {
     setAssetScaleXDraft(savedAssetScaleX);
     setAssetScaleYDraft(savedAssetScaleY);
@@ -1674,7 +1893,9 @@ export function PreviewToolbar({
         value={value}
         aria-label={`${label}缩放`}
         aria-valuetext={`${value}%`}
-        onChange={(event) => previewAssetScale(axis, Number(event.target.value))}
+        onChange={(event) =>
+          previewAssetScale(axis, Number(event.target.value))
+        }
         onPointerUp={() =>
           void commitAssetScaleDraft(assetScaleXDraft, assetScaleYDraft)
         }
@@ -1886,27 +2107,18 @@ export function PreviewToolbar({
                       独立
                     </button>
                   </div>
-                  {assetScaleLinked
-                    ? renderAssetScaleSlider(
-                        "x",
-                        "整体大小",
-                        assetScaleXDraft,
-                      )
-                    : (
-                        <>
-                          {renderAssetScaleSlider(
-                            "x",
-                            "宽度",
-                            assetScaleXDraft,
-                          )}
-                          {renderAssetScaleSlider(
-                            "y",
-                            "高度",
-                            assetScaleYDraft,
-                          )}
-                        </>
-                      )}
-                  <small>可调范围：{PLAYABLE_BUTTON_ASSET_SCALE_MIN}%–{PLAYABLE_BUTTON_ASSET_SCALE_MAX}%</small>
+                  {assetScaleLinked ? (
+                    renderAssetScaleSlider("x", "整体大小", assetScaleXDraft)
+                  ) : (
+                    <>
+                      {renderAssetScaleSlider("x", "宽度", assetScaleXDraft)}
+                      {renderAssetScaleSlider("y", "高度", assetScaleYDraft)}
+                    </>
+                  )}
+                  <small>
+                    可调范围：{PLAYABLE_BUTTON_ASSET_SCALE_MIN}%–
+                    {PLAYABLE_BUTTON_ASSET_SCALE_MAX}%
+                  </small>
                 </div>
               ) : null}
             </span>
@@ -2120,9 +2332,12 @@ function readMotionPresets(): SavedMotionPreset[] {
           (item): item is SavedMotionPreset =>
             typeof item?.name === "string" &&
             item?.config &&
-            ["countdown", "progress-ring", "progress-bar", "hold-charge"].includes(
-              item.config.kind,
-            ) &&
+            [
+              "countdown",
+              "progress-ring",
+              "progress-bar",
+              "hold-charge",
+            ].includes(item.config.kind) &&
             ["visual", "interactive"].includes(item.config.mode) &&
             typeof item.config.duration === "number",
         )
@@ -2162,7 +2377,10 @@ function MotionLibraryPopover({
       setMode(config.mode);
       setDuration(String(config.duration));
       setTimeoutDuration(
-        String(config.timeoutDuration ?? Math.max(config.duration * 2, config.duration + 1)),
+        String(
+          config.timeoutDuration ??
+            Math.max(config.duration * 2, config.duration + 1),
+        ),
       );
       const successSignal =
         connected(config.signal) ||
@@ -2243,8 +2461,8 @@ function MotionLibraryPopover({
       (preset.config.timeoutSignal &&
       signals.some((item) => item.id === preset.config.timeoutSignal)
         ? preset.config.timeoutSignal
-        : signals.find((item) => item.id !== successSignal)?.id ??
-          signals[0]?.id) ?? "",
+        : (signals.find((item) => item.id !== successSignal)?.id ??
+          signals[0]?.id)) ?? "",
     );
     setTimeoutDuration(
       String(
@@ -2259,17 +2477,28 @@ function MotionLibraryPopover({
       <header>
         <strong>动效库</strong>
         {selection ? (
-          <span>{selection.tag === "button" ? "已选中按钮" : `已选中 ${selection.tag}`}</span>
+          <span>
+            {selection.tag === "button"
+              ? "Primary selection: Button"
+              : `Primary selection: ${selection.tag}`}
+          </span>
         ) : (
           <span>添加独立动效</span>
         )}
       </header>
+      {selection ? (
+        <small className="playable-preview-motion-scope">
+          Animation applies only to the primary (last selected) item. Delete removes all selected items.
+        </small>
+      ) : null}
       <label>
         <span>动效类型</span>
         <select
           value={kind}
           aria-label="动效类型"
-          onChange={(event) => setKind(event.target.value as PlayableMotionKind)}
+          onChange={(event) =>
+            setKind(event.target.value as PlayableMotionKind)
+          }
         >
           <option value="countdown">倒计时</option>
           <option value="progress-ring">圆环进度</option>
@@ -2309,7 +2538,9 @@ function MotionLibraryPopover({
           aria-label="成功或自动前进出口"
           onChange={(event) => setSignal(event.target.value)}
         >
-          <option value="" disabled>选择剧情出口</option>
+          <option value="" disabled>
+            选择剧情出口
+          </option>
           {signals.map((item) => (
             <option key={item.id} value={item.id}>
               {item.label}
@@ -2325,7 +2556,9 @@ function MotionLibraryPopover({
             aria-label="超时出口"
             onChange={(event) => setTimeoutSignal(event.target.value)}
           >
-            <option value="" disabled>选择失败出口</option>
+            <option value="" disabled>
+              选择失败出口
+            </option>
             {signals.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.label}
@@ -2351,8 +2584,13 @@ function MotionLibraryPopover({
       {presets.length ? (
         <label>
           <span>已保存动效</span>
-          <select defaultValue="" onChange={(event) => loadPreset(event.target.value)}>
-            <option value="" disabled>选择预设</option>
+          <select
+            defaultValue=""
+            onChange={(event) => loadPreset(event.target.value)}
+          >
+            <option value="" disabled>
+              选择预设
+            </option>
             {presets.map((preset, index) => (
               <option key={`${preset.name}-${index}`} value={index}>
                 {preset.name}
@@ -2367,10 +2605,14 @@ function MotionLibraryPopover({
           disabled={!valid}
           onClick={() => void onApply(config, !selection)}
         >
-          {selection ? "应用到选中元素" : "添加独立动效"}
+          {selection ? "Apply to primary selection" : "Add standalone animation"}
         </button>
         {selection ? (
-          <button type="button" disabled={!valid} onClick={() => void onApply(config, true)}>
+          <button
+            type="button"
+            disabled={!valid}
+            onClick={() => void onApply(config, true)}
+          >
             添加独立动效
           </button>
         ) : null}
@@ -2391,13 +2633,19 @@ function MotionLibraryPopover({
             placeholder="预设名称"
             onChange={(event) => setPresetName(event.target.value)}
           />
-          <button type="button" disabled={!presetName.trim()} onClick={savePreset}>
+          <button
+            type="button"
+            disabled={!presetName.trim()}
+            onClick={savePreset}
+          >
             保存
           </button>
         </div>
       ) : null}
       {!signals.length ? (
-        <small>此节点尚无已连线的剧情出口，动效可以播放，但剧情无法跳转。</small>
+        <small>
+          此节点尚无已连线的剧情出口，动效可以播放，但剧情无法跳转。
+        </small>
       ) : null}
     </section>
   );
@@ -2538,8 +2786,8 @@ export function DrawingLayer({
   );
 }
 
-/** Where chosen media goes: the Scene's background, chat, or a selected button. */
-type MediaTarget = "backdrop" | "chat" | "button";
+/** Where chosen media goes: canvas, background, chat, or a selected button. */
+type MediaTarget = "backdrop" | "chat" | "button" | "button-pressed" | "canvas";
 
 /**
  * Chooses an image or a video from the Library, or uploads a new one.
@@ -2574,7 +2822,7 @@ function useMediaChooser(
         ref={fileInput}
         type="file"
         accept={
-          target.current === "button"
+          target.current === "button" || target.current === "button-pressed"
             ? ".png,.jpg,.jpeg,.webp"
             : ASSET_UPLOAD_ACCEPT
         }
@@ -2602,11 +2850,16 @@ function useMediaChooser(
               ? "Choose a background"
               : target.current === "button"
                 ? "选择按钮图片"
-                : "Add to chat"
+                : target.current === "button-pressed"
+                  ? "选择按钮按下状态图片"
+                  : target.current === "canvas"
+                    ? "添加到画面"
+                    : "添加到聊天"
           }
           assets={library.filter((asset) => {
             const type = playableAssetType(asset.mediaType);
-            return target.current === "button"
+            return target.current === "button" ||
+              target.current === "button-pressed"
               ? type === "image"
               : type === "image" || type === "video";
           })}
@@ -2643,10 +2896,14 @@ function MediaMenu({
   canRemoveBackdrop,
   canSetBackdropLoop,
   backdropLoop,
+  continueWithoutInput,
   canReplaceButton,
+  canSetButtonPressed,
   onChoose,
+  onAddButtonPreset,
   onRemoveBackdrop,
   onBackdropLoopChange,
+  onContinueWithoutInputChange,
 }: {
   disabled: boolean;
   uploading: boolean;
@@ -2654,10 +2911,14 @@ function MediaMenu({
   canRemoveBackdrop: boolean;
   canSetBackdropLoop: boolean;
   backdropLoop: boolean;
+  continueWithoutInput: boolean;
   canReplaceButton: boolean;
+  canSetButtonPressed: boolean;
   onChoose: (to: MediaTarget) => void;
+  onAddButtonPreset: () => void;
   onRemoveBackdrop: () => void;
   onBackdropLoopChange: (loop: boolean) => void;
+  onContinueWithoutInputChange: (enabled: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
@@ -2713,13 +2974,42 @@ function MediaMenu({
             disabled={!canReplaceButton}
             title={
               canReplaceButton
-              ? "替换选中按钮的图片素材"
-              : "请先选择一个按钮"
+                ? "设置按钮未按下时显示的图片"
+                : "请先选择一个按钮"
             }
             onClick={choose("button")}
           >
             <Image size={13} />
-            <span>替换按钮图片</span>
+            <span>普通态图片</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canSetButtonPressed}
+            title={
+              canSetButtonPressed
+                ? "设置按住按钮时显示的图片"
+                : "请先选择一个按钮"
+            }
+            onClick={choose("button-pressed")}
+          >
+            <Image size={13} />
+            <span>按下态图片</span>
+          </button>
+          <button type="button" role="menuitem" onClick={choose("canvas")}>
+            <Image size={13} />
+            <span>添加到画面</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onAddButtonPreset();
+            }}
+          >
+            <MousePointer2 size={13} />
+            <span>按钮预设</span>
           </button>
           <button type="button" role="menuitem" onClick={choose("chat")}>
             <MessageSquarePlus size={13} />
@@ -2750,6 +3040,20 @@ function MediaMenu({
               </button>
             </>
           ) : null}
+          <div className="playable-preview-media-heading">
+            When no action is taken
+          </div>
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={continueWithoutInput}
+            onClick={() =>
+              onContinueWithoutInputChange(!continueWithoutInput)
+            }
+          >
+            <span>Continue the story if no action is taken</span>
+            {continueWithoutInput ? <Check size={14} /> : null}
+          </button>
           {canRemoveBackdrop ? (
             <button
               type="button"

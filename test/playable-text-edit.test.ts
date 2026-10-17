@@ -5,6 +5,7 @@ import {
   offsetOf,
   parsePlayableSourceLocation,
   removePlayableElement,
+  removePlayableTextPart,
   replacePlayableElementText,
 } from "../src/shared/playable-text-edit.js";
 
@@ -34,6 +35,28 @@ describe("parsePlayableSourceLocation", () => {
 });
 
 describe("replacePlayableElementText", () => {
+  it("clears a button's direct label while preserving its nested markup", () => {
+    expect(
+      replacePlayableElementText(
+        '<button data-signal="next">Choose <small>1</small></button>',
+        { line: 1, column: 1 },
+        "Choose",
+        "",
+      ),
+    ).toBe('<button data-signal="next"> <small>1</small></button>');
+  });
+
+  it("edits text nested inside a button without changing sibling labels", () => {
+    expect(
+      replacePlayableElementText(
+        '<button>Continue <small>No save yet</small></button>',
+        { line: 1, column: 1 },
+        "No save yet",
+        "Saved",
+      ),
+    ).toBe('<button>Continue <small>Saved</small></button>');
+  });
+
   it("replaces the text of a text-only element", () => {
     expect(
       replacePlayableElementText(
@@ -248,6 +271,59 @@ describe("removePlayableElement", () => {
         "<main><p>Keep</p></main>",
         { line: 4, column: 1 },
         "p",
+      ),
+    ).toBeUndefined();
+  });
+});
+
+describe("removePlayableTextPart", () => {
+  it("removes nested button text while preserving the button and other labels", () => {
+    expect(
+      removePlayableTextPart(
+        '<button data-signal="continue">Continue <small>No save yet</small></button>',
+        { line: 1, column: 1 },
+        "button",
+        "No save yet",
+      ),
+    ).toBe(
+      '<button data-signal="continue">Continue <small></small></button>',
+    );
+  });
+
+  it("removes button text when its pick points to an annotated ancestor", () => {
+    const source = '<main><section><button data-signal="next"><span>开始</span></button></section></main>';
+    expect(
+      removePlayableTextPart(
+        source,
+        { line: 1, column: 1 },
+        "button",
+        "开始",
+      ),
+    ).toBe(
+      '<main><section><button data-signal="next"><span></span></button></section></main>',
+    );
+  });
+
+  it("removes translated button text using its original source wording", () => {
+    expect(
+      removePlayableTextPart(
+        '<button data-signal="start">Start</button>',
+        { line: 1, column: 1 },
+        "button",
+        "开始",
+        "Start",
+      ),
+    ).toBe('<button data-signal="start"></button>');
+  });
+
+  it("rejects stale text instead of changing the source", () => {
+    const source = "<button>Continue</button>";
+    expect(
+      removePlayableTextPart(
+        source,
+        { line: 1, column: 1 },
+        "button",
+        "No save yet",
       ),
     ).toBeUndefined();
   });

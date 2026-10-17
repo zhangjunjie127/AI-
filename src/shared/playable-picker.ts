@@ -8,6 +8,12 @@ import {
 
 export interface PlayablePickResult {
   nodeId: string;
+  /** A temporary, independently selectable part of a source-backed element. */
+  part?: "button-label";
+  /** Identifies one of several temporary text parts within the same button. */
+  partId?: string;
+  /** Original source wording when the preview displays a translated label. */
+  sourceText?: string;
   /** `<file>:<line>:<column>` from a preview build, when the element came from surface HTML. */
   source?: string;
   /** CSS path from the surface's shadow root to the element. */
@@ -16,6 +22,7 @@ export interface PlayablePickResult {
   signal?: string;
   motion?: PlayableMotionConfig;
   buttonAssetId?: string;
+  buttonPressedAssetId?: string;
   buttonAssetScaleX?: number;
   buttonAssetScaleY?: number;
   tag: string;
@@ -183,6 +190,8 @@ export function describePlayablePick(
   const motion = parsePlayableMotionConfig(target);
   const buttonAssetId =
     target.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.asset) || undefined;
+  const buttonPressedAssetId =
+    target.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.pressedAsset) || undefined;
   const buttonAssetScales = buttonAssetId
     ? playableButtonAssetScales(target)
     : undefined;
@@ -194,6 +203,7 @@ export function describePlayablePick(
     ...(signal ? { signal } : {}),
     ...(motion ? { motion } : {}),
     ...(buttonAssetId ? { buttonAssetId } : {}),
+    ...(buttonPressedAssetId ? { buttonPressedAssetId } : {}),
     ...(buttonAssetScales
       ? {
           buttonAssetScaleX: buttonAssetScales.x,

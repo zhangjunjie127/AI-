@@ -43,7 +43,7 @@ This workspace is the source of truth for an PutengGame Playable Nodes project.
 - \`graph.json\` declares the viewport, initial State, Assets, Nodes, Signals, and navigation edges.
 - Every Node follows the same protocol. Its HTML, CSS, and JavaScript are ordinary source files referenced by \`node.source\`.
 - Node JavaScript exports \`mount(context)\`. Render into \`context.root\` and optionally return a cleanup function.
-- Emit only Signals declared by the current Node: \`context.navigation.emit(signalId)\`. Signals describe outcomes; they do not name target Nodes.
+- Emit only Signals declared by the current Node: \`context.navigation.emit(signalId)\`. Signals describe outcomes; they do not name target Nodes. For a failed interaction or timeout, use \`context.navigation.fail(signalId)\`; the Scene's “continue without input” setting can then suppress that failure Exit. Use \`emit()\` for success and other intentional outcomes.
 - Read and update authoritative project State through \`context.state\`. Do not keep navigation-critical state only in the DOM.
 - A top-level State key is a Variable: something that crosses Nodes or belongs in the save, such as \`trust\` or an \`inventory\` list. Progress inside one Node stays in that Node's code, and content such as item definitions goes in \`shared/\` modules.
 - When you add a Variable, give it a starting value in \`initialState\` and a one-line description in \`variables\`, such as \`"trust": "How much the guard trusts the player"\`. The user sees them read-only in Project → Variables.
@@ -103,7 +103,7 @@ Each Node module exports \`mount(context)\`. The Runtime supplies:
 - \`context.root\`: the Node's isolated ShadowRoot.
 - \`context.assets.url(id)\`: a URL for an Asset declared by this Node.
 - \`context.state.get(key)\`, \`set(key, value)\`, \`patch(values)\`, and \`subscribe(listener)\`.
-- \`context.navigation.emit(signalId)\`, \`back()\`, and \`connected(signalId)\`, which is true when this Node declares the Signal and an edge routes it.
+- \`context.navigation.emit(signalId)\` for normal outcomes, \`fail(signalId)\` for failed interactions/timeouts, \`back()\`, and \`connected(signalId)\`, which is true when this Node declares the Signal and an edge routes it. A Scene configured to continue without input suppresses only connected failure Exits sent through \`fail()\`; success via \`emit()\` is unaffected.
 - \`context.session.hasSave()\`, \`save()\`, \`continue()\`, \`restart()\`, and \`reset()\`.
 - \`context.story.map()\`: the story laid out from the graph in rows from the Start, with what the player has seen across every game. Nodes have \`id\`, \`label\`, \`row\`, \`column\` (from the left of its row of \`rowSize\`), \`ending\`, and \`seen\`; edges have \`from\`, \`to\`, and \`seen\`. It leaves out \`push\` side screens, navigation Signals, steps back up the story, and Nodes with \`story.hidden\`.
 - \`context.lifecycle.signal\`: aborted before cleanup when the Node exits.

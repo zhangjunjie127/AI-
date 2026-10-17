@@ -206,6 +206,18 @@ async function loadMainMenuModule(javascript: string): Promise<{ mount: (context
 }
 
 describe("Main menu Template", () => {
+  it("makes each menu accent an independently selectable element", () => {
+    const source = playablePreset("main-menu")!.source("Ash Club");
+    expect(source.html.match(/class="menu-indicator"/g)).toHaveLength(3);
+    expect(source.html.match(/data-putenggame-selectable/g)).toHaveLength(3);
+    expect(PLAYABLE_PROJECT_STYLE_FILES["shared/style/components.css"]).toContain(
+      ".menu li:is(:hover, :focus-within) .menu-indicator",
+    );
+    expect(PLAYABLE_PROJECT_STYLE_FILES["shared/style/components.css"]).not.toContain(
+      ".menu .action::before",
+    );
+  });
+
   it("starts a new game with the starting Variables after the player goes Home", async () => {
     const preset = playablePreset("main-menu")!;
     const source = preset.source("Ash Club");
@@ -268,6 +280,12 @@ describe("Main menu Template", () => {
 
     expect(runtime.snapshot()).toMatchObject({ currentNodeId: "chapter", state: { trust: 0 } });
   });
+});
+
+it("lets the QTE Template keep playing instead of emitting a missed-action failure when enabled", () => {
+  const qte = playablePreset("qte")!.source("Timed choice");
+  expect(qte.javascript).toContain('context.navigation.fail(signal)');
+  expect(qte.javascript).toContain('context.navigation.emit(signal)');
 });
 
 describe("Affection Template", () => {

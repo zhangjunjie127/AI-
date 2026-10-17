@@ -8,7 +8,6 @@ import {
 } from "./playable-picker.js";
 import {
   parsePlayableRotation,
-  parsePlayableScale,
   parsePlayableTranslate,
   roundRotation,
   roundScale,
@@ -44,6 +43,9 @@ import {
   mountPlayableMotionElement,
   PLAYABLE_MOTION_ATTRIBUTES,
   type PlayableMotionConfig,
+  playableButtonAssetScales,
+  playableElementRuntimeScale,
+  playableElementTransformScale,
   updatePlayableButtonLabelScale,
 } from "./playable-motion.js";
 import { PLAYABLE_SOURCE_ATTRIBUTE } from "./playable-source-locations.js";
@@ -80,7 +82,9 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
   #motionCleanups = new WeakMap<HTMLElement, () => void>();
   #motionContexts = new WeakMap<HTMLElement, PlayableNodeContext>();
   #motionContextsBySurface = new Map<string, PlayableNodeContext>();
+  #buttonPresetCleanups = new WeakMap<HTMLElement, () => void>();
   #motionAssetUrlsByElement = new WeakMap<HTMLElement, string>();
+  #pressedMotionAssetUrlsByElement = new WeakMap<HTMLElement, string>();
   #motionAssetUrls = new Set<string>();
   #surfaceStartedAt = new WeakMap<HTMLElement, number>();
   #timingTimer?: number;
@@ -114,24 +118,144 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
   }
 
   controlMedia(command: PlayableMediaCommand): void {
+    if (command.command === "insert-button-preset") {
+      const surface = [
+        ...this.#nodeLayer.querySelectorAll<HTMLElement>(
+          "[data-playable-surface]",
+        ),
+      ].find(
+        (candidate) => candidate.dataset.playableSurface === command.nodeId,
+      );
+      const root = surface?.shadowRoot;
+      const context = this.#motionContextsBySurface.get(command.nodeId);
+      if (!root || !context) return;
+      const element = this.#document.createElement("button");
+      element.id = command.id;
+      element.type = "button";
+      element.textContent = command.label;
+      element.setAttribute(PLAYABLE_SOURCE_ATTRIBUTE, command.source);
+      element.setAttribute("data-signal", command.signal);
+      element.setAttribute("data-putenggame-button-preset", "");
+      Object.assign(element.style, {
+        position: "absolute",
+        left: "50cqw",
+        top: "50cqh",
+        transform: "translate(-50%, -50%)",
+        minWidth: "14cqw",
+        padding: "1cqh 2cqw",
+        border: "1px solid rgba(255,255,255,.8)",
+        borderRadius: "6px",
+        background: "rgba(20,20,20,.78)",
+        color: "#fff",
+        font: "inherit",
+        cursor: "pointer",
+      });
+      (
+        root.querySelector<HTMLElement>(".stage") ??
+        root.firstElementChild ??
+        root
+      ).append(element);
+      this.#buttonPresetCleanups.set(
+        element,
+        this.#bindButtonPreset(element, context),
+      );
+      this.#picking?.refresh();
+      return;
+    }
+    if (command.command === "insert-media") {
+      const surface = [
+        ...this.#nodeLayer.querySelectorAll<HTMLElement>(
+          "[data-playable-surface]",
+        ),
+      ].find(
+        (candidate) => candidate.dataset.playableSurface === command.nodeId,
+      );
+      const root = surface?.shadowRoot;
+      if (!root) return;
+      const element = this.#document.createElement(
+        command.type === "image" ? "img" : "video",
+      );
+      element.setAttribute(PLAYABLE_SOURCE_ATTRIBUTE, command.source);
+      element.setAttribute("data-putenggame-asset", command.assetId);
+      Object.assign(element.style, {
+        position: "absolute",
+        left: "35cqw",
+        top: "30cqh",
+        width: "30cqw",
+        maxHeight: "60cqh",
+        objectFit: "contain",
+      });
+      const url = URL.createObjectURL(
+        new Blob([command.asset.bytes], { type: command.asset.contentType }),
+      );
+      this.#motionAssetUrls.add(url);
+      if (command.type === "image") {
+        const image = element as HTMLImageElement;
+        image.alt = "";
+        image.draggable = false;
+        image.src = url;
+      } else {
+        const video = element as HTMLVideoElement;
+        video.autoplay = true;
+        video.muted = true;
+        video.loop = true;
+        video.playsInline = true;
+        video.src = url;
+        void video.play().catch(() => {});
+      }
+      (
+        root.querySelector<HTMLElement>(".stage") ??
+        root.firstElementChild ??
+        root
+      ).append(element);
+      this.#picking?.refresh();
+      this.#syncMedia();
+      return;
+    }
     if (command.command === "backdrop-loop") {
       for (const host of this.#nodeLayer.querySelectorAll<HTMLElement>(
         "[data-playable-surface]",
       )) {
-        const video =
-          host.shadowRoot?.querySelector<HTMLVideoElement>(
-            '[data-media="backdrop"] video',
-          );
+        const video = host.shadowRoot?.querySelector<HTMLVideoElement>(
+          '[data-media="backdrop"] video',
+        );
         if (video) video.loop = command.loop;
       }
       return;
     }
-    if (command.command === "button-asset-scale") {
-      const host = [...this.#nodeLayer.querySelectorAll<HTMLElement>(
+    if (command.command === "continue-without-input") {
+      for (const host of this.#nodeLayer.querySelectorAll<HTMLElement>(
         "[data-playable-surface]",
-      )].find(
-        (candidate) =>
-          candidate.dataset.playableSurface === command.nodeId,
+      )) {
+        const root = host.shadowRoot;
+        if (host.dataset.playableSurface !== command.nodeId || !root) continue;
+        const stage =
+          root.querySelector<HTMLElement>("main, .stage") ??
+          [...root.children].find(
+            (element): element is HTMLElement =>
+              element instanceof HTMLElement && element.tagName !== "STYLE",
+          );
+        if (!stage) return;
+        if (command.enabled)
+          stage.setAttribute(
+            PLAYABLE_MOTION_ATTRIBUTES.continueWithoutInput,
+            "true",
+          );
+        else
+          stage.removeAttribute(
+            PLAYABLE_MOTION_ATTRIBUTES.continueWithoutInput,
+          );
+        return;
+      }
+      return;
+    }
+    if (command.command === "button-asset-scale") {
+      const host = [
+        ...this.#nodeLayer.querySelectorAll<HTMLElement>(
+          "[data-playable-surface]",
+        ),
+      ].find(
+        (candidate) => candidate.dataset.playableSurface === command.nodeId,
       );
       const root = host?.shadowRoot;
       if (!root) return;
@@ -142,11 +266,13 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
           element.getAttribute(PLAYABLE_SOURCE_ATTRIBUTE) !== command.source
         )
           return;
-        if (
-          !element.querySelector(
-            "[data-putenggame-button-asset-image] img",
-          )
-        )
+        const previousAssetScale = playableButtonAssetScales(element);
+        const [renderedScaleX, renderedScaleY] = parseScaleAxes(
+          element.style.scale,
+        );
+        const frameScaleX = renderedScaleX / (previousAssetScale.x / 100);
+        const frameScaleY = renderedScaleY / (previousAssetScale.y / 100);
+        if (!element.querySelector("[data-putenggame-button-asset-image] img"))
           return;
         element.setAttribute(
           PLAYABLE_MOTION_ATTRIBUTES.assetScaleX,
@@ -156,7 +282,7 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
           PLAYABLE_MOTION_ATTRIBUTES.assetScaleY,
           String(command.scaleY),
         );
-        element.style.scale = `${command.scaleX / 100} ${command.scaleY / 100}`;
+        element.style.scale = `${frameScaleX * (command.scaleX / 100)} ${frameScaleY * (command.scaleY / 100)}`;
         updatePlayableButtonLabelScale(element);
         this.#picking?.refresh();
       } catch {
@@ -164,9 +290,7 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       }
       return;
     }
-    const video =
-      this.#mediaVideos().find((candidate) => !candidate.paused) ??
-      this.#mediaVideos()[0];
+    const video = this.#targetBackdropVideo();
     if (!video) return;
     if (command.command === "seek") {
       video.currentTime = Math.min(
@@ -272,6 +396,8 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
     const idleCursor =
       tool === "text" ? "text" : tool === "move" ? "grab" : "crosshair";
     this.#projectRoot.style.cursor = idleCursor;
+    const temporaryButtonLabels =
+      tool === "move" ? [] : wrapButtonLabelsForPicking(this.#projectRoot);
     const selectableElements = new Set(
       selectableSourceTargets(this.#projectRoot),
     );
@@ -326,8 +452,11 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         height: `${box.height}px`,
       });
     };
-    const selectionKey = (pick: PlayablePickResult) =>
-      `${pick.nodeId}:${pick.cssPath}`;
+    const selectionKey = (
+      pick: PlayablePickResult,
+      part?: SelectedElement["part"],
+    ) =>
+      `${pick.nodeId}:${pick.cssPath}:${part ?? pick.part ?? "element"}:${pick.partId ?? ""}`;
     const createSelectionOutline = () => {
       const target = this.#document.createElement("div");
       target.dataset.playablePickOutline = "multiple";
@@ -344,11 +473,16 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       return target;
     };
     const placeSelectionOutlines = () => {
-      const activeKey = selected ? selectionKey(selected.pick) : undefined;
+      const activeKey = selected
+        ? selectionKey(selected.pick, selected.part)
+        : undefined;
       const currentKeys = new Set(
         selectedElements
-          .filter((item) => selectionKey(item.pick) !== activeKey)
-          .map((item) => selectionKey(item.pick)),
+          .filter(
+            (item) =>
+              selectionKey(item.pick, item.part) !== activeKey,
+          )
+          .map((item) => selectionKey(item.pick, item.part)),
       );
       for (const [key, target] of selectionOutlines) {
         if (!currentKeys.has(key)) {
@@ -357,7 +491,7 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         }
       }
       for (const item of selectedElements) {
-        const key = selectionKey(item.pick);
+        const key = selectionKey(item.pick, item.part);
         if (key === activeKey) continue;
         const target = selectionOutlines.get(key) ?? createSelectionOutline();
         selectionOutlines.set(key, target);
@@ -407,13 +541,26 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
               )?.pick.box
             : undefined,
         );
-      const pick = describePlayablePick(event.composedPath());
-      const target = event.composedPath()[0];
+      const path = event.composedPath();
+      const pointer = event as PointerEvent;
+      const pointTarget =
+        tool === "select"
+          ? selectableElementAtPoint(
+              path,
+              selectableElements,
+              pointer.clientX,
+              pointer.clientY,
+            )
+          : undefined;
+      const pick = pointTarget
+        ? pickForElement(pointTarget)
+        : describePlayablePick(path);
+      const target = path[0];
       if (pick && tool === "select" && !pick.source) {
         place(undefined);
         return;
       }
-      const sourceTarget = describePlayableSourceTarget(event.composedPath());
+      const sourceTarget = describePlayableSourceTarget(path);
       if (
         sourceTarget?.pick.mediaSlot === "backdrop" ||
         pick?.mediaSlot === "backdrop"
@@ -686,13 +833,19 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         box,
         center,
         base: {
-          scale: parsePlayableScale(element.style.scale || computed.scale),
+          scale: playableElementTransformScale(
+            element,
+            element.style.scale || computed.scale,
+          ),
           rotation: parsePlayableRotation(
             element.style.rotate || computed.rotate,
           ),
         },
         transform: {
-          scale: parsePlayableScale(element.style.scale || computed.scale),
+          scale: playableElementTransformScale(
+            element,
+            element.style.scale || computed.scale,
+          ),
           rotation: parsePlayableRotation(
             element.style.rotate || computed.rotate,
           ),
@@ -731,7 +884,10 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         current.transform.scale = roundScale(
           current.base.scale * Math.max(0.05, factor),
         );
-        current.element.style.scale = String(current.transform.scale);
+        current.element.style.scale = playableElementRuntimeScale(
+          current.element,
+          current.transform.scale,
+        );
       }
       place(selectedBox(current.element));
     };
@@ -749,7 +905,10 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       const inPlace = current.inPlace && !overridesTransform(current.element);
       current.element.style.scale =
         changed && inPlace
-          ? String(current.transform.scale)
+          ? playableElementRuntimeScale(
+              current.element,
+              current.transform.scale,
+            )
           : current.original.scale;
       current.element.style.rotate =
         changed && inPlace
@@ -794,30 +953,45 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       }
       const frameTargets = selectableSourceTargets(this.#projectRoot);
       const targets = frameTargets.flatMap((element) => {
-        const pick = pickForElement(element);
+        const label = element.hasAttribute("data-putenggame-button-label")
+          ? element
+          : undefined;
+        const pick = label
+          ? buttonLabelPick(label)
+          : pickForElement(element);
+        const targetBox = selectedBox(element);
         return pick?.source &&
           pick.mediaSlot !== "backdrop" &&
-          intersects(box, pick.box)
-          ? [{ element, pick }]
+          intersects(box, targetBox)
+          ? [
+              {
+                element,
+                pick: label ? { ...pick, box: targetBox } : pick,
+                ...(label ? { part: "button-label" as const } : {}),
+              },
+            ]
           : [];
       });
       if (!targets.length) return;
       if (!current.additive) selectedElements = [];
-      targets.forEach(({ element, pick }, index) => {
+      targets.forEach(({ element, pick, part }, index) => {
         const additive = current.additive || index > 0;
         handlers.onPick(pick, additive);
         const appearance = interactionForElement(element);
         if (appearance) handlers.onInteractionSelect(appearance, additive);
-        const key = selectionKey(pick);
+        const key = selectionKey(pick, part);
         const existing = selectedElements.some(
-          (item) => selectionKey(item.pick) === key,
+          (item) => selectionKey(item.pick, item.part) === key,
         );
         if (current.additive && existing) {
           selectedElements = selectedElements.filter(
-            (item) => selectionKey(item.pick) !== key,
+            (item) => selectionKey(item.pick, item.part) !== key,
           );
         } else if (!existing) {
-          selectedElements = [...selectedElements, { element, pick }];
+          selectedElements = [
+            ...selectedElements,
+            { element, pick, ...(part ? { part } : {}) },
+          ];
         }
       });
       selected = selectedElements.at(-1);
@@ -828,13 +1002,18 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       const current = selected;
       if (current.pick.mediaSlot === "backdrop") return;
       selectedElements = selectedElements.filter(
-        (item) => selectionKey(item.pick) !== selectionKey(current.pick),
+        (item) =>
+          selectionKey(item.pick, item.part) !==
+          selectionKey(current.pick, current.part),
       );
       selected = selectedElements.at(-1);
       current.element.remove();
       placeSelected();
       handlers.onDelete({
         pick: current.pick,
+        ...(current.part ?? current.pick.part
+          ? { part: current.part ?? current.pick.part }
+          : {}),
         inPlace: Boolean(current.pick.source),
       });
     };
@@ -842,7 +1021,8 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       if (tool !== "select" || !selectedElements.length) return;
       if (
         selectedElements.some(
-          ({ pick }) => !pick.source || pick.mediaSlot === "backdrop",
+          ({ pick, part }) =>
+            part || !pick.source || pick.mediaSlot === "backdrop",
         )
       ) {
         copiedElements = [];
@@ -916,12 +1096,9 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
               : undefined;
           const computedTranslate = view.getComputedStyle(element).translate;
           const translate =
-            bounds &&
-            parsePlayableTranslate(computedTranslate, bounds);
+            bounds && parsePlayableTranslate(computedTranslate, bounds);
           const [translateX = "0px", translateY = "0px"] =
-            computedTranslate === "none"
-              ? []
-              : computedTranslate.split(/\s+/);
+            computedTranslate === "none" ? [] : computedTranslate.split(/\s+/);
           clone.style.translate = translate
             ? (playableTranslateValue({
                 x: translate.x + 2,
@@ -1023,11 +1200,21 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
               mouse.clientY,
             )
           : undefined;
-        const appearance = pointTarget
+        const appearance =
+          pointTarget?.hasAttribute("data-putenggame-selectable")
+            ? undefined
+            : pointTarget
           ? describePlayableAppearanceTarget(elementPath(pointTarget))
           : path
             ? describePlayableAppearanceTarget(path)
             : undefined;
+        const pointLabel = pointTarget
+          ? buttonLabelInPath(elementPath(pointTarget))
+          : undefined;
+        const selectedLabel = pointLabel ?? label;
+        const labelButtonPick = selectedLabel
+          ? buttonLabelPick(selectedLabel)
+          : undefined;
         const pointPick = pointTarget ? pickForElement(pointTarget) : undefined;
         const sourceTarget =
           pointTarget && pointPick
@@ -1035,11 +1222,11 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
             : path
               ? describePlayableSourceTarget(path)
               : undefined;
-        const selectedPick = sourceTarget?.pick ?? pick;
+        const selectedPick = labelButtonPick ?? sourceTarget?.pick ?? pick;
         if (selectedPick.mediaSlot === "backdrop") return;
         const additive = mouse.shiftKey || mouse.metaKey || mouse.ctrlKey;
         handlers.onPick(selectedPick, additive);
-        const selectedElement =
+        const selectedElement = selectedLabel ??
           (sourceTarget?.element as HTMLElement | undefined) ??
           path?.find(
             (target): target is HTMLElement =>
@@ -1047,15 +1234,22 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
               target.getAttribute("data-playable-surface") === null,
           );
         if (selectedElement) {
-          const next = { element: selectedElement, pick: selectedPick };
-          const key = selectionKey(next.pick);
+          const part: SelectedElement["part"] = selectedLabel
+            ? "button-label"
+            : undefined;
+          const next = {
+            element: selectedElement,
+            pick: selectedPick,
+            ...(part ? { part } : {}),
+          };
+          const key = selectionKey(next.pick, next.part);
           const existing = selectedElements.some(
-            (item) => selectionKey(item.pick) === key,
+            (item) => selectionKey(item.pick, item.part) === key,
           );
           if (!additive) selectedElements = [next];
           else if (existing)
             selectedElements = selectedElements.filter(
-              (item) => selectionKey(item.pick) !== key,
+              (item) => selectionKey(item.pick, item.part) !== key,
             );
           else selectedElements = [...selectedElements, next];
           selected = selectedElements.at(-1);
@@ -1096,7 +1290,22 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         }
         return;
       }
-      const target = label ?? path?.[0];
+      const textLabel =
+        tool === "text"
+          ? (label ??
+            path
+              ?.filter(
+                (target): target is HTMLElement =>
+                  target instanceof HTMLElement,
+              )
+              .map((element) =>
+                element.querySelector<HTMLElement>(
+                  "[data-putenggame-button-label]",
+                ),
+              )
+              .find((element): element is HTMLElement => Boolean(element)))
+          : undefined;
+      const target = textLabel ?? path?.[0];
       if (!isTextTarget(target)) {
         handlers.onTextSelect(undefined);
         place(undefined);
@@ -1170,10 +1379,7 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         return;
       }
       block(event);
-      if (
-        (keyboard.ctrlKey || keyboard.metaKey) &&
-        !keyboard.altKey
-      ) {
+      if ((keyboard.ctrlKey || keyboard.metaKey) && !keyboard.altKey) {
         const shortcut = keyboard.key.toLowerCase();
         if (shortcut === "z") {
           handlers.onHistoryCommand?.(keyboard.shiftKey ? "redo" : "undo");
@@ -1228,14 +1434,14 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       paste: pasteCopied,
       refresh: placeSelected,
       delete: (pick) => {
-        const key = selectionKey(pick);
+        const key = selectionKey(pick, pick.part);
         const current = selectedElements.find(
-          (item) => selectionKey(item.pick) === key,
+          (item) => selectionKey(item.pick, item.part) === key,
         );
         if (!current) return;
         current.element.remove();
         selectedElements = selectedElements.filter(
-          (item) => selectionKey(item.pick) !== key,
+          (item) => selectionKey(item.pick, item.part) !== key,
         );
         selected = selectedElements.at(-1);
         placeSelected();
@@ -1251,6 +1457,9 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         for (const target of selectionOutlines.values()) target.remove();
         selectionOutlines.clear();
         marquee.remove();
+        temporaryButtonLabels.forEach((label) =>
+          label.replaceWith(...Array.from(label.childNodes)),
+        );
         this.#projectRoot.style.cursor = previousCursor;
       },
     };
@@ -1343,9 +1552,11 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
   updateTextStyle(command: PlayableTextStyleCommand): void {
     const { pick, property, value } = command;
     if (!pick.source || !value.trim()) return;
-    const surface = [...this.#nodeLayer.querySelectorAll<HTMLElement>(
-      "[data-playable-surface]",
-    )].find((candidate) => candidate.dataset.playableSurface === pick.nodeId);
+    const surface = [
+      ...this.#nodeLayer.querySelectorAll<HTMLElement>(
+        "[data-playable-surface]",
+      ),
+    ].find((candidate) => candidate.dataset.playableSurface === pick.nodeId);
     const root = surface?.shadowRoot;
     if (!root) return;
     try {
@@ -1367,9 +1578,11 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
     const target = command.target;
     const surfaceId =
       target.kind === "element" ? target.pick.nodeId : target.nodeId;
-    const surface = [...this.#nodeLayer.querySelectorAll<HTMLElement>(
-      "[data-playable-surface]",
-    )].find((candidate) => candidate.dataset.playableSurface === surfaceId);
+    const surface = [
+      ...this.#nodeLayer.querySelectorAll<HTMLElement>(
+        "[data-playable-surface]",
+      ),
+    ].find((candidate) => candidate.dataset.playableSurface === surfaceId);
     const root = surface?.shadowRoot;
     if (!root) return;
     let element: HTMLElement | null = null;
@@ -1378,7 +1591,8 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         const candidate = root.querySelector<HTMLElement>(target.pick.cssPath);
         if (
           candidate?.tagName.toLowerCase() === target.pick.tag &&
-          candidate.getAttribute(PLAYABLE_SOURCE_ATTRIBUTE) === target.pick.source
+          candidate.getAttribute(PLAYABLE_SOURCE_ATTRIBUTE) ===
+            target.pick.source
         )
           element = candidate;
       } catch {
@@ -1399,7 +1613,11 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
           display: "grid",
           placeItems: "center",
         });
-        (root.querySelector<HTMLElement>(".stage") ?? root.firstElementChild ?? root).append(element);
+        (
+          root.querySelector<HTMLElement>(".stage") ??
+          root.firstElementChild ??
+          root
+        ).append(element);
       }
     }
     if (!element) return;
@@ -1409,10 +1627,13 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       [PLAYABLE_MOTION_ATTRIBUTES.kind]: command.config?.kind,
       [PLAYABLE_MOTION_ATTRIBUTES.mode]: command.config?.mode,
       [PLAYABLE_MOTION_ATTRIBUTES.duration]:
-        command.config === undefined ? undefined : String(command.config.duration),
+        command.config === undefined
+          ? undefined
+          : String(command.config.duration),
       [PLAYABLE_MOTION_ATTRIBUTES.signal]: command.config?.signal,
       [PLAYABLE_MOTION_ATTRIBUTES.timeoutSignal]: command.config?.timeoutSignal,
       [PLAYABLE_MOTION_ATTRIBUTES.asset]: command.assetId,
+      [PLAYABLE_MOTION_ATTRIBUTES.pressedAsset]: command.pressedAssetId,
       [PLAYABLE_MOTION_ATTRIBUTES.assetScaleX]:
         command.assetScaleX === undefined
           ? undefined
@@ -1434,6 +1655,17 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       this.#motionAssetUrlsByElement.set(element, assetUrl);
     }
     assetUrl ??= this.#motionAssetUrlsByElement.get(element);
+    let pressedAssetUrl: string | undefined;
+    if (command.pressedAsset && command.pressedAssetId) {
+      pressedAssetUrl = URL.createObjectURL(
+        new Blob([command.pressedAsset.bytes], {
+          type: command.pressedAsset.contentType,
+        }),
+      );
+      this.#motionAssetUrls.add(pressedAssetUrl);
+      this.#pressedMotionAssetUrlsByElement.set(element, pressedAssetUrl);
+    }
+    pressedAssetUrl ??= this.#pressedMotionAssetUrlsByElement.get(element);
     const context =
       this.#motionContexts.get(element) ??
       this.#motionContextsBySurface.get(surfaceId);
@@ -1441,7 +1673,7 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
     if (context)
       this.#motionCleanups.set(
         element,
-        mountPlayableMotionElement(element, context, assetUrl),
+        mountPlayableMotionElement(element, context, assetUrl, pressedAssetUrl),
       );
   }
 
@@ -1464,6 +1696,12 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
     const template = this.#document.createElement("template");
     template.innerHTML = surface.html;
     root.append(style, template.content.cloneNode(true));
+    for (const media of root.querySelectorAll<
+      HTMLImageElement | HTMLVideoElement
+    >("[data-putenggame-asset]")) {
+      const assetId = media.getAttribute("data-putenggame-asset");
+      if (assetId) media.src = context.assets.url(assetId);
+    }
     if (this.#backdropEffects)
       this.#applyBackdropEffects(host, this.#backdropEffects);
     for (const element of root.querySelectorAll<HTMLElement>(
@@ -1483,12 +1721,34 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         throw new Error(
           `Playable surface "${surface.id}" does not export a mount function.`,
         );
-      const nodeContext = { ...context, root };
+      const nodeContext: PlayableNodeContext = {
+        ...context,
+        root,
+        navigation: {
+          ...context.navigation,
+          fail: (signal) =>
+            root.querySelector(
+              `[${PLAYABLE_MOTION_ATTRIBUTES.continueWithoutInput}="true"]`,
+            ) && context.navigation.connected(signal)
+              ? Promise.resolve()
+              : context.navigation.fail(signal),
+        },
+      };
       const cleanup = await module.mount(nodeContext);
       this.#motionContextsBySurface.set(surface.id, nodeContext);
+      const buttonPresetElements = [
+        ...root.querySelectorAll<HTMLElement>(
+          "[data-putenggame-button-preset]",
+        ),
+      ];
+      for (const element of buttonPresetElements)
+        this.#buttonPresetCleanups.set(
+          element,
+          this.#bindButtonPreset(element, nodeContext),
+        );
       const motionCleanups: (() => void)[] = [];
       for (const element of root.querySelectorAll<HTMLElement>(
-        `[${PLAYABLE_MOTION_ATTRIBUTES.kind}], [${PLAYABLE_MOTION_ATTRIBUTES.asset}]`,
+        `[${PLAYABLE_MOTION_ATTRIBUTES.kind}], [${PLAYABLE_MOTION_ATTRIBUTES.asset}], [${PLAYABLE_MOTION_ATTRIBUTES.pressedAsset}]`,
       )) {
         this.#motionContexts.set(element, nodeContext);
         const cleanup = mountPlayableMotionElement(element, nodeContext);
@@ -1500,10 +1760,16 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         cleanup: async () => {
           motionCleanups.forEach((cleanup) => cleanup());
           for (const element of root.querySelectorAll<HTMLElement>(
-            `[${PLAYABLE_MOTION_ATTRIBUTES.kind}], [${PLAYABLE_MOTION_ATTRIBUTES.asset}]`,
+            `[${PLAYABLE_MOTION_ATTRIBUTES.kind}], [${PLAYABLE_MOTION_ATTRIBUTES.asset}], [${PLAYABLE_MOTION_ATTRIBUTES.pressedAsset}]`,
           )) {
             this.#motionContexts.delete(element);
             this.#motionCleanups.delete(element);
+          }
+          for (const element of root.querySelectorAll<HTMLElement>(
+            "[data-putenggame-button-preset]",
+          )) {
+            this.#buttonPresetCleanups.get(element)?.();
+            this.#buttonPresetCleanups.delete(element);
           }
           this.#motionContextsBySurface.delete(surface.id);
           await (cleanup as PlayableCleanup | undefined)?.();
@@ -1514,6 +1780,18 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
       host.remove();
       throw cause;
     }
+  }
+
+  #bindButtonPreset(
+    element: HTMLElement,
+    context: PlayableNodeContext,
+  ): () => void {
+    const click = () => {
+      const signal = element.getAttribute("data-signal");
+      if (signal) void context.navigation.emit(signal).catch(() => {});
+    };
+    element.addEventListener("click", click);
+    return () => element.removeEventListener("click", click);
   }
 
   #applyBackdropEffects(
@@ -1565,9 +1843,28 @@ export class DocumentPlayableSurfaceHost implements PlayableSurfaceHost {
         "pause",
         "ended",
       ])
-        video.addEventListener(type, () => this.#emitMediaState(video));
+        video.addEventListener(type, () =>
+          this.#emitMediaState(this.#targetBackdropVideo()),
+        );
     }
-    this.#emitMediaState(videos.find((video) => !video.paused) ?? videos[0]);
+    this.#emitMediaState(this.#targetBackdropVideo());
+  }
+
+  #targetBackdropVideo(): HTMLVideoElement | undefined {
+    const videos: HTMLVideoElement[] = [];
+    for (const surface of this.#nodeLayer.querySelectorAll<HTMLElement>(
+      "[data-playable-surface]",
+    )) {
+      const backdrop = surface.shadowRoot?.querySelector<HTMLElement>(
+        '[data-media="backdrop"]',
+      );
+      const video =
+        backdrop?.tagName.toLowerCase() === "video"
+          ? (backdrop as HTMLVideoElement)
+          : backdrop?.querySelector<HTMLVideoElement>("video");
+      if (video) videos.push(video);
+    }
+    return videos.find((video) => !video.paused) ?? videos[0];
   }
 
   #updateTimedVisibility(): void {
@@ -1757,6 +2054,7 @@ type TransformHandleKind = "nw" | "ne" | "sw" | "se" | "rotate";
 interface SelectedElement {
   element: HTMLElement;
   pick: PlayablePickResult;
+  part?: "button-label";
 }
 
 interface MarqueeDrag {
@@ -1789,29 +2087,30 @@ function createTransformHandles(document: Document): HTMLDivElement[] {
     Object.assign(handle.style, {
       position: "absolute",
       zIndex: "3",
-      width: kind === "rotate" ? "10px" : "8px",
-      height: kind === "rotate" ? "10px" : "8px",
+      width: kind === "rotate" ? "14px" : "16px",
+      height: kind === "rotate" ? "14px" : "16px",
       boxSizing: "border-box",
       border: "1px solid #4f8cff",
       borderRadius: "2px",
       background: "#fff",
       pointerEvents: "auto",
+      touchAction: "none",
       ...(kind === "nw"
-        ? { left: "-5px", top: "-5px", cursor: "nwse-resize" }
+        ? { left: "-8px", top: "-8px", cursor: "nwse-resize" }
         : {}),
       ...(kind === "ne"
-        ? { right: "-5px", top: "-5px", cursor: "nesw-resize" }
+        ? { right: "-8px", top: "-8px", cursor: "nesw-resize" }
         : {}),
       ...(kind === "sw"
-        ? { left: "-5px", bottom: "-5px", cursor: "nesw-resize" }
+        ? { left: "-8px", bottom: "-8px", cursor: "nesw-resize" }
         : {}),
       ...(kind === "se"
-        ? { right: "-5px", bottom: "-5px", cursor: "nwse-resize" }
+        ? { right: "-8px", bottom: "-8px", cursor: "nwse-resize" }
         : {}),
       ...(kind === "rotate"
         ? {
             left: "50%",
-            top: "-28px",
+            top: "-34px",
             transform: "translateX(-50%)",
             borderRadius: "50%",
             cursor: "grab",
@@ -1880,12 +2179,15 @@ function intersects(
 
 function selectableSourceTargets(root: HTMLElement): HTMLElement[] {
   const elements: HTMLElement[] = [];
+  const labels: HTMLElement[] = [];
   const visit = (container: Document | ShadowRoot | HTMLElement) => {
     for (const element of Array.from(
       container.querySelectorAll<HTMLElement>("*"),
     )) {
       if (element.hasAttribute(PLAYABLE_SOURCE_ATTRIBUTE))
         elements.push(element);
+      if (element.hasAttribute("data-putenggame-button-label"))
+        labels.push(element);
       if (element.shadowRoot) visit(element.shadowRoot);
     }
   };
@@ -1894,6 +2196,11 @@ function selectableSourceTargets(root: HTMLElement): HTMLElement[] {
   const targets = new Set<HTMLElement>();
   for (const element of elements) {
     if (isBackdropElement(element)) continue;
+
+    if (element.hasAttribute("data-putenggame-selectable")) {
+      targets.add(element);
+      continue;
+    }
 
     const interaction = nearestSourceAncestor(
       element,
@@ -1912,7 +2219,53 @@ function selectableSourceTargets(root: HTMLElement): HTMLElement[] {
     )
       targets.add(element);
   }
+  labels.forEach((label) => targets.add(label));
   return [...targets];
+}
+
+function wrapButtonLabelsForPicking(root: HTMLElement): HTMLSpanElement[] {
+  const buttons: HTMLElement[] = [];
+  const visit = (container: Document | ShadowRoot | HTMLElement) => {
+    for (const element of Array.from(
+      container.querySelectorAll<HTMLElement>("*"),
+    )) {
+      if (
+        element.hasAttribute(PLAYABLE_SOURCE_ATTRIBUTE) &&
+        (element.tagName.toLowerCase() === "button" ||
+          element.getAttribute("role") === "button") &&
+        !element.querySelector("[data-putenggame-button-label]")
+      )
+        buttons.push(element);
+      if (element.shadowRoot) visit(element.shadowRoot);
+    }
+  };
+  visit(root);
+  return buttons.flatMap((button) => {
+    const walker = button.ownerDocument.createTreeWalker(button, 4, {
+      acceptNode: (node) =>
+        node.textContent?.trim() &&
+        !["SCRIPT", "STYLE"].includes(
+          node.parentElement?.tagName.toUpperCase() ?? "",
+        ) &&
+        !node.parentElement?.closest("svg")
+          ? 1
+          : 2,
+    });
+    const textNodes: Text[] = [];
+    while (walker.nextNode()) textNodes.push(walker.currentNode as Text);
+    return textNodes.map((node) => {
+      const label = button.ownerDocument.createElement("span");
+      label.dataset.putenggameButtonLabel = "";
+      Object.assign(label.style, {
+        display: "inline-block",
+        transformOrigin: "center",
+        verticalAlign: "inherit",
+      });
+      node.replaceWith(label);
+      label.append(node);
+      return label;
+    });
+  });
 }
 
 function nearestSourceAncestor(
@@ -1983,6 +2336,7 @@ function pickForElement(element: HTMLElement): PlayablePickResult | undefined {
 function interactionForElement(
   element: HTMLElement,
 ): PlayableInteractionSelection | undefined {
+  if (element.hasAttribute("data-putenggame-selectable")) return undefined;
   const appearance = describePlayableAppearanceTarget(elementPath(element));
   if (!appearance) return undefined;
   const target = appearance.element as HTMLElement;
@@ -2036,16 +2390,19 @@ function movableTarget(
   selectable: ReadonlySet<HTMLElement>,
   x: number,
   y: number,
-): {
-  element: HTMLElement;
-  pick: PlayablePickResult;
-  part?: "button-label";
-} | undefined {
+):
+  | {
+      element: HTMLElement;
+      pick: PlayablePickResult;
+      part?: "button-label";
+    }
+  | undefined {
   const label = buttonLabelInPath(path);
-  if (label?.parentElement && selectable.has(label.parentElement)) {
-    const pick = pickForElement(label.parentElement);
+  const button = label?.closest<HTMLElement>('button, [role="button"]');
+  if (button && selectable.has(button)) {
+    const pick = pickForElement(button);
     if (pick?.buttonAssetId)
-      return { element: label, pick, part: "button-label" };
+      return { element: label!, pick, part: "button-label" };
   }
   const element = selectableElementAtPoint(path, selectable, x, y);
   if (!element) return undefined;
@@ -2064,12 +2421,63 @@ function buttonLabelInPath(
   );
 }
 
+function buttonLabelPick(label: HTMLElement): PlayablePickResult | undefined {
+  const button = label.closest<HTMLElement>('button, [role="button"]');
+  const pick = button ? pickForElement(button) : undefined;
+  const walker = label.ownerDocument.createTreeWalker(
+    label,
+    label.ownerDocument.defaultView?.NodeFilter.SHOW_TEXT ?? 4,
+  );
+  const sourceText: string[] = [];
+  while (walker.nextNode())
+    sourceText.push(playableOriginalText(walker.currentNode as Text));
+  const labelIndex = button
+    ? Array.from(
+        button.querySelectorAll<HTMLElement>(
+          "[data-putenggame-button-label]",
+        ),
+      ).indexOf(label)
+    : -1;
+  return pick
+    ? {
+        ...pick,
+        part: "button-label",
+        ...(labelIndex >= 0 ? { partId: String(labelIndex) } : {}),
+        text: (label.textContent ?? "").replace(/\s+/g, " ").trim(),
+        sourceText: sourceText.join("").replace(/\s+/g, " ").trim(),
+        box: selectedBox(label),
+      }
+    : undefined;
+}
+
 function selectableElementAtPoint(
   path: readonly EventTarget[],
   selectable: ReadonlySet<HTMLElement>,
   x: number,
   y: number,
 ): HTMLElement | undefined {
+  const explicitlySelectable = [...selectable]
+    .filter((element) => {
+      if (!element.hasAttribute("data-putenggame-selectable")) return false;
+      const box = element.getBoundingClientRect();
+      const horizontalPadding = Math.max(0, (14 - box.width) / 2);
+      const verticalPadding = Math.max(0, (14 - box.height) / 2);
+      return (
+        x >= box.left - horizontalPadding &&
+        x <= box.right + horizontalPadding &&
+        y >= box.top - verticalPadding &&
+        y <= box.bottom + verticalPadding
+      );
+    })
+    .sort((first, second) => {
+      const firstBox = first.getBoundingClientRect();
+      const secondBox = second.getBoundingClientRect();
+      return (
+        firstBox.width * firstBox.height - secondBox.width * secondBox.height
+      );
+    })[0];
+  if (explicitlySelectable) return explicitlySelectable;
+
   const direct = path.find(
     (target): target is HTMLElement =>
       target instanceof HTMLElement && selectable.has(target),
@@ -2126,6 +2534,12 @@ function overridesTransform(element: Element): boolean {
   });
 }
 
+function parseScaleAxes(value: string): [number, number] {
+  if (!value.trim() || value.trim() === "none") return [1, 1];
+  const [x, y = x] = value.trim().split(/\s+/).map(Number);
+  return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : [1, 1];
+}
+
 /**
  * Elements whose text can be typed over: they hold text of their own and are
  * not form fields. A container whose text all sits in child elements is not
@@ -2158,10 +2572,12 @@ function isTextTarget(target: unknown): boolean {
  * be rewritten directly.
  */
 function holdsSourceText(element: Element): boolean {
+  let current: Element | null = element;
+  while (current && !current.hasAttribute(PLAYABLE_SOURCE_ATTRIBUTE))
+    current = current.parentElement;
   return (
     element.hasAttribute(PLAYABLE_SOURCE_ATTRIBUTE) ||
-    (element.hasAttribute("data-putenggame-button-label") &&
-      element.parentElement?.hasAttribute(PLAYABLE_SOURCE_ATTRIBUTE) === true)
+    (element.hasAttribute("data-putenggame-button-label") && current !== null)
   );
 }
 

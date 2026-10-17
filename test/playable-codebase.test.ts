@@ -63,6 +63,10 @@ describe("Playable codebase", () => {
       .toContain("Every Node follows the same protocol");
     expect(await readFile(path.join(workspace, "README.md"), "utf8"))
       .toContain("context.navigation.emit(signalId)");
+    expect(await readFile(path.join(workspace, "AGENTS.md"), "utf8"))
+      .toContain("context.navigation.fail(signalId)");
+    expect(await readFile(path.join(workspace, "README.md"), "utf8"))
+      .toContain("failed interactions/timeouts");
     // An empty project is a valid draft.
     await expect(buildPlayableProject(workspace, "draft")).resolves.toBeDefined();
   });

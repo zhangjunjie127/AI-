@@ -73,8 +73,14 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
     return;
   }
   if (event.data.kind === "putenggame:playable:media-command") {
-    if (session?.instanceId === event.data.instanceId)
+    if (session?.instanceId === event.data.instanceId) {
+      if (event.data.command.command === "insert-button-preset")
+        session.runtime.registerSignal(event.data.command.nodeId, {
+          id: event.data.command.signal,
+          label: event.data.command.label,
+        });
       session.host.controlMedia(event.data.command);
+    }
     return;
   }
   if (event.data.kind === "putenggame:playable:delete-element") {

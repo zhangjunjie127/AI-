@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { setPlayableOriginalText } from "../src/shared/playable-text-source.js";
 import { Window } from "happy-dom";
+import { removePlayableTextPart } from "../src/shared/playable-text-edit.js";
 import {
   describePlayableSourceTarget,
   describePlayableAppearanceTarget,
@@ -453,6 +455,379 @@ describe("pick protocol messages", () => {
 });
 
 describe("DocumentPlayableSurfaceHost click selection", () => {
+  it("suppresses only failure navigation while continue-without-input is enabled", async () => {
+    const window = new Window();
+    Object.defineProperty(window, "top", { value: {} });
+    Object.defineProperty(window, "origin", { value: "null" });
+    Object.assign(globalThis, {
+      MutationObserver: window.MutationObserver,
+      HTMLElement: window.HTMLElement,
+      Element: window.Element,
+      ShadowRoot: window.ShadowRoot,
+      Event: window.Event,
+      getComputedStyle: window.getComputedStyle.bind(window),
+    });
+    const document = window.document as unknown as Document;
+    let mountedContext:
+      | import("../src/shared/playable-nodes.js").PlayableNodeContext
+      | undefined;
+    const host = new DocumentPlayableSurfaceHost(document, async () => ({
+      mount: async (
+        context: import("../src/shared/playable-nodes.js").PlayableNodeContext,
+      ) => {
+        mountedContext = context;
+      },
+    }));
+    const emit = vi.fn(async () => {});
+    const fail = vi.fn(async () => {});
+    await host.mountNode(
+      {
+        id: "qte",
+        html: '<main data-putenggame-continue-without-input="true"></main>',
+        css: "",
+        javascript: "",
+        inputs: [],
+      },
+      {
+        assets: { url: () => "" },
+        state: {} as never,
+        session: {} as never,
+        story: {} as never,
+        lifecycle: { signal: new AbortController().signal },
+        navigation: {
+          emit,
+          fail,
+          back: async () => {},
+          connected: () => true,
+        },
+      },
+    );
+
+    await mountedContext!.navigation.fail("fail");
+    await mountedContext!.navigation.emit("success");
+    expect(fail).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith("success");
+
+    host.controlMedia({
+      command: "continue-without-input",
+      nodeId: "qte",
+      enabled: false,
+    });
+    await mountedContext!.navigation.fail("fail");
+    expect(fail).toHaveBeenCalledWith("fail");
+
+    host.destroy();
+    window.close();
+  });
+
+  it("inserts a live button preset and emits its declared Signal", async () => {
+    const window = new Window();
+    Object.defineProperty(window, "top", { value: {} });
+    Object.defineProperty(window, "origin", { value: "null" });
+    Object.assign(globalThis, {
+      MutationObserver: window.MutationObserver,
+      HTMLElement: window.HTMLElement,
+      Element: window.Element,
+      ShadowRoot: window.ShadowRoot,
+      Event: window.Event,
+      getComputedStyle: window.getComputedStyle.bind(window),
+    });
+    const document = window.document as unknown as Document;
+    const host = new DocumentPlayableSurfaceHost(document, async () => ({
+      mount: async () => undefined,
+    }));
+    const emit = vi.fn(async () => {});
+    await host.mountNode(
+      {
+        id: "start",
+        html: '<main class="stage"></main>',
+        css: "",
+        javascript: "",
+        inputs: [],
+      },
+      {
+        assets: { url: () => "" },
+        state: {} as never,
+        session: {} as never,
+        story: {} as never,
+        lifecycle: { signal: new AbortController().signal },
+        navigation: { emit, back: async () => {}, connected: () => false },
+      } as never,
+    );
+
+    host.controlMedia({
+      command: "insert-button-preset",
+      nodeId: "start",
+      id: "putenggame-button-new",
+      source: "nodes/start/index.html:1:1",
+      signal: "button-1",
+      label: "新按钮",
+    });
+    const surface = document.querySelector<HTMLElement>(
+      '[data-playable-surface="start"]',
+    )!;
+    const button = surface.shadowRoot!.querySelector<HTMLElement>(
+      "button[data-putenggame-button-preset]",
+    )!;
+    expect(button.textContent).toBe("新按钮");
+    button.click();
+
+    expect(emit).toHaveBeenCalledWith("button-1");
+    host.destroy();
+    window.close();
+  });
+
+  it("selects and deletes an explicitly selectable decoration inside a button", async () => {
+    const window = new Window();
+    Object.defineProperty(window, "top", { value: {} });
+    Object.defineProperty(window, "origin", { value: "null" });
+    Object.assign(globalThis, {
+      MutationObserver: window.MutationObserver,
+      HTMLElement: window.HTMLElement,
+      Element: window.Element,
+      ShadowRoot: window.ShadowRoot,
+      Event: window.Event,
+      getComputedStyle: window.getComputedStyle.bind(window),
+    });
+    const document = window.document as unknown as Document;
+    const host = new DocumentPlayableSurfaceHost(document, async () => ({
+      mount: async () => undefined,
+    }));
+    await host.mountNode(
+      {
+        id: "menu",
+        html: [
+          '<main data-putenggame-source="nodes/menu/index.html:1:1">',
+          '<button data-putenggame-source="nodes/menu/index.html:2:1" data-signal="start">Start</button>',
+          '<span data-putenggame-source="nodes/menu/index.html:3:1" data-putenggame-selectable class="menu-indicator"></span>',
+          "</main>",
+        ].join(""),
+        css: "",
+        javascript: "",
+        inputs: [],
+      },
+      {} as never,
+    );
+    const root = document.querySelector<HTMLElement>(
+      '[data-playable-sandbox="true"]',
+    )!;
+    const surface = document.querySelector<HTMLElement>(
+      '[data-playable-surface="menu"]',
+    )!;
+    const indicator =
+      surface.shadowRoot!.querySelector<HTMLElement>(".menu-indicator")!;
+    const button = surface.shadowRoot!.querySelector<HTMLElement>("button")!;
+    Object.defineProperty(root, "getBoundingClientRect", {
+      value: () => ({ x: 0, y: 0, width: 640, height: 360 }),
+    });
+    Object.defineProperty(surface, "getBoundingClientRect", {
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        width: 640,
+        height: 360,
+      }),
+    });
+    Object.defineProperty(indicator, "getBoundingClientRect", {
+      value: () => ({
+        x: 20,
+        y: 20,
+        left: 20,
+        top: 20,
+        right: 20,
+        bottom: 20,
+        width: 0,
+        height: 0,
+      }),
+    });
+    Object.defineProperty(button, "getBoundingClientRect", {
+      value: () => ({
+        x: 0,
+        y: 10,
+        left: 0,
+        top: 10,
+        right: 120,
+        bottom: 50,
+        width: 120,
+        height: 40,
+      }),
+    });
+    const onPick = vi.fn();
+    const onDelete = vi.fn();
+    host.startPicking("select", {
+      onPick,
+      onTextSelect: () => undefined,
+      onInteractionSelect: () => undefined,
+      onTextEdit: () => undefined,
+      onTextCreate: () => undefined,
+      onMove: () => undefined,
+      onTransform: () => undefined,
+      onDelete,
+      onPasteElements: async () => undefined,
+      onCancel: () => undefined,
+    });
+
+    const down = new Event("pointerdown", { bubbles: true, composed: true });
+    Object.assign(down, { button: 0, pointerId: 1, clientX: 22, clientY: 20 });
+    button.dispatchEvent(down);
+    const up = new Event("pointerup", { bubbles: true, composed: true });
+    Object.assign(up, { button: 0, pointerId: 1, clientX: 22, clientY: 20 });
+    root.dispatchEvent(up);
+    const click = new Event("click", { bubbles: true, composed: true });
+    Object.assign(click, {
+      clientX: 22,
+      clientY: 20,
+      shiftKey: false,
+      metaKey: false,
+      ctrlKey: false,
+    });
+    button.dispatchEvent(click);
+
+    expect(onPick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tag: "span",
+        source: "nodes/menu/index.html:3:1",
+        cssPath: "main > span",
+      }),
+      false,
+    );
+    expect(onDelete).not.toHaveBeenCalled();
+    document.body.dispatchEvent(
+      new window.KeyboardEvent("keydown", {
+        bubbles: true,
+        key: "Delete",
+      }) as unknown as Event,
+    );
+    expect(onDelete).toHaveBeenCalledWith({
+      pick: expect.objectContaining({
+        tag: "span",
+        source: "nodes/menu/index.html:3:1",
+        cssPath: "main > span",
+      }),
+      inPlace: true,
+    });
+
+    host.destroy();
+    window.close();
+  });
+
+  it("selects and deletes nested button text without deleting its button", async () => {
+    const window = new Window();
+    Object.defineProperty(window, "top", { value: {} });
+    Object.defineProperty(window, "origin", { value: "null" });
+    Object.assign(globalThis, {
+      MutationObserver: window.MutationObserver,
+      HTMLElement: window.HTMLElement,
+      Element: window.Element,
+      ShadowRoot: window.ShadowRoot,
+      Event: window.Event,
+      getComputedStyle: window.getComputedStyle.bind(window),
+    });
+    const document = window.document as unknown as Document;
+    const host = new DocumentPlayableSurfaceHost(document, async () => ({
+      mount: async () => undefined,
+    }));
+    await host.mountNode(
+      {
+        id: "choice",
+        html: '<main><button data-signal="next" data-putenggame-source="nodes/choice/index.html:1:7">Choose <small>Start</small></button></main>',
+        css: "",
+        javascript: "",
+        inputs: [],
+      },
+      {} as never,
+    );
+    const root = document.querySelector<HTMLElement>(
+      '[data-playable-sandbox="true"]',
+    )!;
+    const surface = document.querySelector<HTMLElement>(
+      '[data-playable-surface="choice"]',
+    )!;
+    const button = surface.shadowRoot!.querySelector<HTMLButtonElement>(
+      "button",
+    )!;
+    Object.defineProperty(root, "getBoundingClientRect", {
+      value: () => ({ x: 0, y: 0, width: 640, height: 360 }),
+    });
+    Object.defineProperty(button, "getBoundingClientRect", {
+      value: () => ({ x: 100, y: 100, width: 240, height: 64 }),
+    });
+    const onPick = vi.fn();
+    const onDelete = vi.fn();
+    host.startPicking("select", {
+      onPick,
+      onTextSelect: () => undefined,
+      onInteractionSelect: () => undefined,
+      onTextEdit: () => undefined,
+      onTextCreate: () => undefined,
+      onMove: () => undefined,
+      onTransform: () => undefined,
+      onDelete,
+      onPasteElements: async () => undefined,
+      onCancel: () => undefined,
+    });
+    const label = button.querySelector<HTMLElement>(
+      "small [data-putenggame-button-label]",
+    )!;
+    const labelText = label.firstChild as Text;
+    setPlayableOriginalText(labelText, "Start");
+    labelText.nodeValue = "开始";
+    Object.defineProperty(label, "getBoundingClientRect", {
+      value: () => ({ x: 140, y: 120, width: 80, height: 24 }),
+    });
+
+    label.dispatchEvent(
+      new Event("click", { bubbles: true, composed: true }),
+    );
+    const outline = root.querySelector<HTMLElement>(
+      '[data-playable-pick-outline="true"]',
+    )!;
+    expect(outline.style.left).toBe("140px");
+    expect(outline.style.width).toBe("80px");
+    expect(onPick.mock.calls.at(-1)?.[0]).toMatchObject({
+      tag: "button",
+      part: "button-label",
+      signal: "next",
+      text: "开始",
+      sourceText: "Start",
+      source: "nodes/choice/index.html:1:7",
+    });
+
+    const remove = new Event("keydown", { bubbles: true, composed: true });
+    Object.assign(remove, { key: "Delete", ctrlKey: false, metaKey: false });
+    label.dispatchEvent(remove);
+    expect(onDelete).toHaveBeenCalledWith({
+      pick: expect.objectContaining({
+        tag: "button",
+        signal: "next",
+        text: "开始",
+        sourceText: "Start",
+      }),
+      part: "button-label",
+      inPlace: true,
+    });
+    const deletion = onDelete.mock.calls.at(-1)![0]!;
+    expect(
+      removePlayableTextPart(
+        '<main><button data-signal="next">Choose <small>Start</small></button></main>',
+        { line: 1, column: 7 },
+        deletion.pick.tag,
+        deletion.pick.text,
+        deletion.pick.sourceText,
+      ),
+    ).toBe(
+      '<main><button data-signal="next">Choose <small></small></button></main>',
+    );
+    expect(button.isConnected).toBe(true);
+    expect(button.hasAttribute("data-signal")).toBe(true);
+    expect(button.textContent).toBe("Choose ");
+
+    host.destroy();
+    window.close();
+  });
+
   it("picks a small text item beneath a non-selectable overlapping container", async () => {
     const window = new Window();
     Object.defineProperty(window, "top", { value: {} });
@@ -968,6 +1343,63 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
     expect(secondButton.classList.contains("rise")).toBe(true);
     expect(animations.map(({ currentTime }) => currentTime)).toEqual([0, 0]);
     expect(video.currentTime).toBe(42);
+  });
+
+  it("keeps preview timeline controls fixed to the background video", async () => {
+    const window = new Window();
+    Object.defineProperty(window, "top", { value: {} });
+    Object.defineProperty(window, "origin", { value: "null" });
+    Object.assign(globalThis, {
+      MutationObserver: window.MutationObserver,
+      HTMLElement: window.HTMLElement,
+      Element: window.Element,
+      ShadowRoot: window.ShadowRoot,
+      Event: window.Event,
+      getComputedStyle: window.getComputedStyle.bind(window),
+    });
+    const document = window.document as unknown as Document;
+    const host = new DocumentPlayableSurfaceHost(document, async () => ({
+      mount: async () => undefined,
+    }));
+    await host.mountNode(
+      {
+        id: "scene",
+        html: '<main><div data-media="backdrop"><video id="backdrop"></video></div><video id="foreground"></video></main>',
+        css: "",
+        javascript: "",
+        inputs: [],
+      },
+      {} as never,
+    );
+    const surface = document.querySelector<HTMLElement>(
+      '[data-playable-surface="scene"]',
+    )!;
+    const backdrop =
+      surface.shadowRoot!.querySelector<HTMLVideoElement>("#backdrop")!;
+    const foreground =
+      surface.shadowRoot!.querySelector<HTMLVideoElement>("#foreground")!;
+    Object.defineProperty(backdrop, "currentTime", {
+      configurable: true,
+      writable: true,
+      value: 2,
+    });
+    Object.defineProperty(foreground, "currentTime", {
+      configurable: true,
+      writable: true,
+      value: 7,
+    });
+    const states: { currentTime: number; duration: number; paused: boolean }[] =
+      [];
+    host.setMediaStateListener((state) => states.push(state));
+
+    host.controlMedia({ command: "seek", time: 5 });
+    foreground.dispatchEvent(new window.Event("timeupdate") as unknown as Event);
+
+    expect(backdrop.currentTime).toBe(5);
+    expect(foreground.currentTime).toBe(7);
+    expect(states.at(-1)?.currentTime).toBe(5);
+    host.destroy();
+    window.close();
   });
 
   it("keeps overlays visible after video end unless they have a disappearance time", async () => {
@@ -1600,6 +2032,108 @@ describe("DocumentPlayableSurfaceHost click selection", () => {
     expect(button.style.scale).toBe("2 1");
     expect(outline.style.left).toBe("50px");
     expect(outline.style.width).toBe("200px");
+
+    host.destroy();
+    window.close();
+  });
+
+  it("starts resizing from the larger corner handles and preserves button frame scale", async () => {
+    const window = new Window();
+    Object.defineProperty(window, "top", { value: {} });
+    Object.defineProperty(window, "origin", { value: "null" });
+    Object.assign(globalThis, {
+      MutationObserver: window.MutationObserver,
+      HTMLElement: window.HTMLElement,
+      Element: window.Element,
+      ShadowRoot: window.ShadowRoot,
+      Event: window.Event,
+      getComputedStyle: window.getComputedStyle.bind(window),
+    });
+    const document = window.document as unknown as Document;
+    const host = new DocumentPlayableSurfaceHost(document, async () => ({
+      mount: async () => undefined,
+    }));
+    await host.mountNode(
+      {
+        id: "choice",
+        html: '<main><button style="scale: 1.5" data-putenggame-button-asset-scale-x="150" data-putenggame-button-asset="button-image" data-putenggame-source="nodes/choice/index.html:1:7">Choice</button></main>',
+        css: "",
+        javascript: "",
+        inputs: [],
+      },
+      { assets: { url: () => "/button-image.png" } } as never,
+    );
+    const root = document.querySelector<HTMLElement>(
+      '[data-playable-sandbox="true"]',
+    )!;
+    const surface = document.querySelector<HTMLElement>(
+      '[data-playable-surface="choice"]',
+    )!;
+    const button = surface.shadowRoot!.querySelector<HTMLButtonElement>(
+      "button",
+    )!;
+    const box = { x: 100, y: 100, width: 100, height: 100 };
+    Object.defineProperty(root, "getBoundingClientRect", {
+      value: () => ({ x: 0, y: 0, width: 720, height: 1280 }),
+    });
+    Object.defineProperty(button, "getBoundingClientRect", {
+      value: () => box,
+    });
+    const onTransform = vi.fn();
+    host.startPicking("select", {
+      onPick: () => undefined,
+      onTextSelect: () => undefined,
+      onInteractionSelect: () => undefined,
+      onTextEdit: () => undefined,
+      onTextCreate: () => undefined,
+      onMove: () => undefined,
+      onTransform,
+      onDelete: () => undefined,
+      onPasteElements: async () => undefined,
+      onCancel: () => undefined,
+    });
+
+    const down = (target: HTMLElement, pointerId: number, x: number, y: number) => {
+      const event = new Event("pointerdown", { bubbles: true, composed: true });
+      Object.assign(event, { button: 0, pointerId, clientX: x, clientY: y });
+      target.dispatchEvent(event);
+    };
+    down(button, 1, 120, 120);
+    const up = new Event("pointerup", { bubbles: true, composed: true });
+    Object.assign(up, { button: 0, pointerId: 1, clientX: 120, clientY: 120 });
+    root.dispatchEvent(up);
+    const click = new Event("click", { bubbles: true, composed: true });
+    Object.assign(click, { clientX: 120, clientY: 120 });
+    button.dispatchEvent(click);
+
+    const handle = root.querySelector<HTMLElement>(
+      '[data-playable-transform-handle="se"]',
+    )!;
+    expect(handle.style.width).toBe("16px");
+    down(handle, 2, 200, 200);
+    const move = new Event("pointermove", { bubbles: true, composed: true });
+    Object.assign(move, { pointerId: 2, clientX: 250, clientY: 250 });
+    root.dispatchEvent(move);
+    const resizeUp = new Event("pointerup", { bubbles: true, composed: true });
+    Object.assign(resizeUp, {
+      button: 0,
+      pointerId: 2,
+      clientX: 250,
+      clientY: 250,
+    });
+    root.dispatchEvent(resizeUp);
+
+    expect(onTransform).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transform: { scale: 3, rotation: 0 },
+        inPlace: true,
+      }),
+    );
+    expect(button.style.scale).toBe("4.5 3");
+    expect(
+      root.querySelector<HTMLElement>("[data-playable-pick-marquee]")?.style
+        .display,
+    ).toBe("none");
 
     host.destroy();
     window.close();

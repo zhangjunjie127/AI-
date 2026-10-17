@@ -237,7 +237,7 @@ it("offers motion presets and applies the chosen interaction mode", async () => 
   await choose('[aria-label="持续时间（秒）"]', "4");
   await choose('[aria-label="超时出口"]', "timeout");
   const apply = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
-    (button) => button.textContent?.includes("应用到选中元素"),
+    (button) => button.textContent?.includes("Apply to primary selection"),
   )!;
   await act(async () => apply.click());
   expect(onApplyMotion).toHaveBeenCalledWith(

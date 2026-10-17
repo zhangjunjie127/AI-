@@ -207,6 +207,75 @@ describe("Playable sandbox", () => {
       }),
     ).toBe(false);
   });
+
+  it("validates the node-level no-input continuation command", () => {
+    const message = {
+      kind: "putenggame:playable:media-command",
+      instanceId: "instance",
+      command: {
+        command: "continue-without-input",
+        nodeId: "start",
+        enabled: true,
+      },
+    };
+    expect(isPlayableHostMessage(message)).toBe(true);
+    expect(
+      isPlayableHostMessage({
+        ...message,
+        command: { ...message.command, enabled: "true" },
+      }),
+    ).toBe(false);
+  });
+
+  it("validates live insertion commands for canvas media", () => {
+    const message = {
+      kind: "putenggame:playable:media-command",
+      instanceId: "instance",
+      command: {
+        command: "insert-media",
+        nodeId: "start",
+        source: "nodes/start/index.html:2:3",
+        assetId: "portrait",
+        type: "image",
+        asset: {
+          contentType: "image/png",
+          bytes: new ArrayBuffer(4),
+        },
+      },
+    };
+    expect(isPlayableHostMessage(message)).toBe(true);
+    expect(
+      isPlayableHostMessage({
+        ...message,
+        command: {
+          ...message.command,
+          type: "audio",
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("validates live insertion commands for button presets", () => {
+    const message = {
+      kind: "putenggame:playable:media-command",
+      instanceId: "instance",
+      command: {
+        command: "insert-button-preset",
+        nodeId: "start",
+        id: "putenggame-button-new",
+        source: "nodes/start/index.html:2:3",
+        signal: "button-1",
+        label: "新按钮",
+      },
+    };
+    expect(isPlayableHostMessage(message)).toBe(true);
+    expect(
+      isPlayableHostMessage({
+        ...message,
+        command: { ...message.command, signal: 42 },
+      }),
+    ).toBe(false);
+  });
 });
 
 interface FakeMeta {

@@ -47,6 +47,23 @@ export type PlayableMediaCommand =
   | { command: "play" }
   | { command: "pause" }
   | { command: "backdrop-loop"; loop: boolean }
+  | { command: "continue-without-input"; nodeId: string; enabled: boolean }
+  | {
+      command: "insert-media";
+      nodeId: string;
+      source: string;
+      assetId: string;
+      type: "image" | "video";
+      asset: PlayableAssetTransfer;
+    }
+  | {
+      command: "insert-button-preset";
+      nodeId: string;
+      id: string;
+      source: string;
+      signal: string;
+      label: string;
+    }
   | {
       command: "button-asset-scale";
       nodeId: string;
@@ -102,8 +119,10 @@ export interface PlayableTextStyleEdit {
   inPlace: boolean;
 }
 
-export interface PlayableTextStyleCommand
-  extends Omit<PlayableTextStyleEdit, "inPlace"> {
+export interface PlayableTextStyleCommand extends Omit<
+  PlayableTextStyleEdit,
+  "inPlace"
+> {
   sequence: number;
 }
 
@@ -145,6 +164,8 @@ export interface PlayableMotionCommand {
   assetScaleX?: number;
   assetScaleY?: number;
   asset?: PlayableAssetTransfer;
+  pressedAssetId?: string;
+  pressedAsset?: PlayableAssetTransfer;
 }
 
 /** An element the author dragged in the preview. */
@@ -173,6 +194,8 @@ export interface PlayableTransformEdit {
 /** A selected element removed from the source surface. */
 export interface PlayableDeleteEdit {
   pick: PlayablePickResult;
+  /** Deletes only the visible label while preserving its button and behavior. */
+  part?: "button-label";
   inPlace: boolean;
 }
 
@@ -477,7 +500,12 @@ export function isPlayableHostMessage(
       ) ||
       (command.config !== undefined &&
         (!isRecord(command.config) ||
-          !["countdown", "progress-ring", "progress-bar", "hold-charge"].includes(String(command.config.kind)) ||
+          ![
+            "countdown",
+            "progress-ring",
+            "progress-bar",
+            "hold-charge",
+          ].includes(String(command.config.kind)) ||
           !["interactive", "visual"].includes(String(command.config.mode)) ||
           typeof command.config.duration !== "number" ||
           !Number.isFinite(command.config.duration) ||
@@ -488,8 +516,10 @@ export function isPlayableHostMessage(
               !Number.isFinite(command.config.timeoutDuration) ||
               command.config.timeoutDuration < command.config.duration ||
               command.config.timeoutDuration > 3600)) ||
-          (command.config.signal !== undefined && typeof command.config.signal !== "string") ||
-          (command.config.timeoutSignal !== undefined && typeof command.config.timeoutSignal !== "string"))) ||
+          (command.config.signal !== undefined &&
+            typeof command.config.signal !== "string") ||
+          (command.config.timeoutSignal !== undefined &&
+            typeof command.config.timeoutSignal !== "string"))) ||
       (command.assetId !== undefined && typeof command.assetId !== "string") ||
       (command.assetScaleX !== undefined &&
         (typeof command.assetScaleX !== "number" ||
@@ -504,7 +534,13 @@ export function isPlayableHostMessage(
       (command.asset !== undefined &&
         (!isRecord(command.asset) ||
           typeof command.asset.contentType !== "string" ||
-          !(command.asset.bytes instanceof ArrayBuffer)))
+          !(command.asset.bytes instanceof ArrayBuffer))) ||
+      (command.pressedAssetId !== undefined &&
+        typeof command.pressedAssetId !== "string") ||
+      (command.pressedAsset !== undefined &&
+        (!isRecord(command.pressedAsset) ||
+          typeof command.pressedAsset.contentType !== "string" ||
+          !(command.pressedAsset.bytes instanceof ArrayBuffer)))
     )
       return false;
     return true;
@@ -520,8 +556,25 @@ export function isPlayableHostMessage(
       isRecord(value.command) &&
       (value.command.command === "play" ||
         value.command.command === "pause" ||
+        (value.command.command === "insert-media" &&
+          typeof value.command.nodeId === "string" &&
+          typeof value.command.source === "string" &&
+          typeof value.command.assetId === "string" &&
+          (value.command.type === "image" || value.command.type === "video") &&
+          isRecord(value.command.asset) &&
+          typeof value.command.asset.contentType === "string" &&
+          value.command.asset.bytes instanceof ArrayBuffer) ||
+        (value.command.command === "insert-button-preset" &&
+          typeof value.command.nodeId === "string" &&
+          typeof value.command.id === "string" &&
+          typeof value.command.source === "string" &&
+          typeof value.command.signal === "string" &&
+          typeof value.command.label === "string") ||
         (value.command.command === "backdrop-loop" &&
           typeof value.command.loop === "boolean") ||
+        (value.command.command === "continue-without-input" &&
+          typeof value.command.nodeId === "string" &&
+          typeof value.command.enabled === "boolean") ||
         (value.command.command === "button-asset-scale" &&
           typeof value.command.nodeId === "string" &&
           typeof value.command.cssPath === "string" &&
@@ -620,8 +673,7 @@ export function isPlayableFrameMessage(
       isRecord(value.move.translate) &&
       typeof value.move.translate.x === "number" &&
       typeof value.move.translate.y === "number" &&
-      (value.move.part === undefined ||
-        value.move.part === "button-label") &&
+      (value.move.part === undefined || value.move.part === "button-label") &&
       typeof value.move.inPlace === "boolean"
     );
   if (value.kind === "putenggame:playable:transformed")
@@ -640,6 +692,8 @@ export function isPlayableFrameMessage(
     return (
       isRecord(value.edit) &&
       isRecord(value.edit.pick) &&
+      (value.edit.part === undefined ||
+        value.edit.part === "button-label") &&
       typeof value.edit.inPlace === "boolean"
     );
   if (value.kind === "putenggame:playable:element-paste") {

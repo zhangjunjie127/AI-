@@ -171,6 +171,10 @@ export const PLAYABLE_PROJECT_STYLE_FILES: Record<string, string> = {
   list-style: none;
 }
 
+.menu li {
+  position: relative;
+}
+
 .menu .action {
   position: relative;
   border: 0;
@@ -181,22 +185,24 @@ export const PLAYABLE_PROJECT_STYLE_FILES: Record<string, string> = {
   transition: padding 0.25s, color 0.2s;
 }
 
-.menu .action::before {
-  content: "";
+.menu-indicator {
   position: absolute;
   left: 0;
   top: 50%;
   width: 0;
   height: 0.18cqw;
   background: var(--color-accent);
-  transition: width 0.25s;
+  transform: translateY(-50%);
+  transition: width 0.25s, left 0.25s;
+  cursor: pointer;
+  pointer-events: none;
 }
 
-.menu .action:not([aria-disabled="true"]):is(:hover, :focus-visible) {
+.menu li:is(:hover, :focus-within) .action:not([aria-disabled="true"]) {
   padding-left: 3cqw;
 }
 
-.menu .action:not([aria-disabled="true"]):is(:hover, :focus-visible)::before {
+.menu li:is(:hover, :focus-within) .menu-indicator {
   width: 1.8cqw;
 }
 

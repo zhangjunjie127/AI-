@@ -71,8 +71,22 @@ export function replacePlayableElementText(
   const sourceText = contents
     .map(({ start: textStart, end }) => decode(html.slice(textStart, end)))
     .join("");
-  if (!contents.length || normalize(sourceText) !== normalize(before))
-    return undefined;
+  if (!contents.length || normalize(sourceText) !== normalize(before)) {
+    const opening = html.slice(start!, open);
+    const buttonLike =
+      tag.toLowerCase() === "button" ||
+      /\brole\s*=\s*(?:"button"|'button'|button)(?:\s|>)/i.test(opening);
+    if (!buttonLike) return undefined;
+    const nestedText = descendantTextRanges(html, open, close).find(
+      ({ start: textStart, end }) =>
+        normalize(decode(html.slice(textStart, end))) === normalize(before),
+    );
+    if (!nestedText) return undefined;
+    const value = html.slice(nestedText.start, nestedText.end);
+    const leading = /^\s*/.exec(value)![0];
+    const trailing = /\s*$/.exec(value.slice(leading.length))![0];
+    return `${html.slice(0, nestedText.start)}${leading}${escapeText(after.trim())}${trailing}${html.slice(nestedText.end)}`;
+  }
   const first = contents[0]!;
   const last = contents.at(-1)!;
   const leading = /^\s*/.exec(html.slice(first.start, first.end))![0];
@@ -242,6 +256,53 @@ export function removePlayableElement(
   return range ? `${html.slice(0, start!)}${html.slice(range.end)}` : undefined;
 }
 
+/** Removes one selected text node inside a source-backed element. */
+export function removePlayableTextPart(
+  html: string,
+  location: Pick<PlayableSourceLocation, "line" | "column">,
+  tag: string,
+  text: string,
+  sourceText = text,
+): string | undefined {
+  const start = offsetOf(html, location.line, location.column);
+  if (start === undefined || !sourceText.trim()) return undefined;
+
+  const candidates: { start: number; end: number }[] = [];
+  const sourceTag = /^<([A-Za-z][\w-]*)/.exec(html.slice(start))?.[1];
+  const sourceRange = sourceTag ? elementRange(html, start, sourceTag) : undefined;
+  if (!sourceRange) return undefined;
+  const searchEnd = sourceRange.end;
+  let cursor = start;
+  while (cursor < searchEnd) {
+    const opening = html.indexOf("<", cursor);
+    if (opening < 0 || opening >= searchEnd) break;
+    const name = /^<([A-Za-z][\w-]*)/.exec(html.slice(opening))?.[1];
+    if (name?.toLowerCase() === tag.toLowerCase()) {
+      const range = elementRange(html, opening, tag);
+      const open = startTagEnd(html, opening);
+      if (range && open !== undefined && !/\/\s*>$/.test(html.slice(opening, open))) {
+        const close = html.lastIndexOf("<", range.end - 1);
+        for (const part of descendantTextRanges(html, open, close)) {
+          if (
+            normalize(decode(html.slice(part.start, part.end))) ===
+            normalize(sourceText)
+          )
+            candidates.push(part);
+        }
+      }
+    }
+    const tokenEnd = startTagEnd(html, opening);
+    if (tokenEnd === undefined) break;
+    cursor = tokenEnd;
+  }
+  if (candidates.length !== 1) return undefined;
+  const selected = candidates[0]!;
+  const value = html.slice(selected.start, selected.end);
+  const leading = /^\s*/.exec(value)![0];
+  const trailing = /\s*$/.exec(value.slice(leading.length))![0];
+  return `${html.slice(0, selected.start)}${leading}${trailing}${html.slice(selected.end)}`;
+}
+
 function elementRange(
   html: string,
   start: number,
@@ -284,6 +345,33 @@ function elementRange(
     cursor = end;
   }
   return undefined;
+}
+
+function descendantTextRanges(
+  html: string,
+  start: number,
+  end: number,
+): { start: number; end: number }[] {
+  const ranges: { start: number; end: number }[] = [];
+  let cursor = start;
+  while (cursor < end) {
+    const open = html.indexOf("<", cursor);
+    if (open < 0 || open >= end) {
+      if (cursor < end) ranges.push({ start: cursor, end });
+      break;
+    }
+    if (cursor < open) ranges.push({ start: cursor, end: open });
+    if (html.startsWith("<!--", open)) {
+      const commentEnd = html.indexOf("-->", open + 4);
+      if (commentEnd < 0 || commentEnd >= end) return [];
+      cursor = commentEnd + 3;
+      continue;
+    }
+    const tokenEnd = startTagEnd(html, open);
+    if (tokenEnd === undefined || tokenEnd > end) return [];
+    cursor = tokenEnd;
+  }
+  return ranges;
 }
 
 /** The offset of a 1-based line and column in `html`, or undefined past its end. */

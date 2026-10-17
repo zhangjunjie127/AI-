@@ -4,10 +4,7 @@ import type { PlayableSourceLocation } from "./playable-text-edit.js";
 import type { PlayableNodeContext } from "./playable-nodes.js";
 
 export type PlayableMotionKind =
-  | "countdown"
-  | "progress-ring"
-  | "progress-bar"
-  | "hold-charge";
+  "countdown" | "progress-ring" | "progress-bar" | "hold-charge";
 
 export type PlayableMotionMode = "interactive" | "visual";
 
@@ -33,12 +30,45 @@ export const PLAYABLE_MOTION_ATTRIBUTES = {
   timeoutDuration: "data-putenggame-motion-timeout-duration",
   signal: "data-putenggame-motion-signal",
   timeoutSignal: "data-putenggame-motion-timeout",
+  continueWithoutInput: "data-putenggame-continue-without-input",
   asset: "data-putenggame-button-asset",
+  pressedAsset: "data-putenggame-button-pressed-asset",
   assetScale: "data-putenggame-button-asset-scale",
   assetScaleX: "data-putenggame-button-asset-scale-x",
   assetScaleY: "data-putenggame-button-asset-scale-y",
   labelTranslate: "data-putenggame-button-label-translate",
 } as const;
+
+export function setPlayableContinueWithoutInput(
+  html: string,
+  enabled: boolean,
+): string | undefined {
+  const root = /<[a-z][\w-]*\b[^>]*>/i.exec(html);
+  if (!root) return undefined;
+  const attribute = PLAYABLE_MOTION_ATTRIBUTES.continueWithoutInput;
+  const escaped = attribute.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expression = new RegExp(
+    `\\s${escaped}(?:\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s>]+))?`,
+    "i",
+  );
+  let opening = root[0].replace(expression, "");
+  if (enabled) {
+    const close = opening.endsWith("/>") ? "/>" : ">";
+    opening = `${opening.slice(0, -close.length).trimEnd()} ${attribute}="true"${close}`;
+  }
+  return `${html.slice(0, root.index)}${opening}${html.slice(root.index + root[0].length)}`;
+}
+
+export function playableContinueWithoutInput(html: string): boolean {
+  const root = /<[a-z][\w-]*\b[^>]*>/i.exec(html)?.[0];
+  if (!root) return false;
+  const attribute = PLAYABLE_MOTION_ATTRIBUTES.continueWithoutInput;
+  const match = new RegExp(
+    `\\s${attribute.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*=\\s*(?:"true"|'true'|true)(?:\\s|\\/?>)`,
+    "i",
+  ).exec(root);
+  return Boolean(match);
+}
 
 export const PLAYABLE_BUTTON_ASSET_SCALE_MIN = 10;
 export const PLAYABLE_BUTTON_ASSET_SCALE_MAX = 500;
@@ -114,6 +144,39 @@ export function playableButtonAssetScales(
   };
 }
 
+export function playableElementTransformScale(
+  element: Pick<HTMLElement, "getAttribute">,
+  value: string,
+): number {
+  const scale = Number.parseFloat(value.trim());
+  if (!Number.isFinite(scale) || scale <= 0) return 1;
+  if (!element.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.asset)) return scale;
+  return scale / (playableButtonAssetScales(element).x / 100);
+}
+
+export function playableElementRuntimeScale(
+  element: Pick<HTMLElement, "getAttribute">,
+  scale: number,
+): string {
+  if (!element.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.asset))
+    return String(scale);
+  const assetScale = playableButtonAssetScales(element);
+  return formatScaleAxes(
+    scale * (assetScale.x / 100),
+    scale * (assetScale.y / 100),
+  );
+}
+
+function parseScaleAxes(value: string): [number, number] {
+  if (!value.trim() || value.trim() === "none") return [1, 1];
+  const [x, y = x] = value.trim().split(/\s+/).map(Number);
+  return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : [1, 1];
+}
+
+function formatScaleAxes(x: number, y: number): string {
+  return `${Number(x.toFixed(4))} ${Number(y.toFixed(4))}`;
+}
+
 export function setPlayableElementAttributes(
   html: string,
   location: Pick<PlayableSourceLocation, "line" | "column">,
@@ -136,7 +199,8 @@ export function setPlayableElementAttributes(
       "i",
     );
     const existing = expression.exec(next);
-    if (existing) next = `${next.slice(0, existing.index)}${next.slice(existing.index + existing[0].length)}`;
+    if (existing)
+      next = `${next.slice(0, existing.index)}${next.slice(existing.index + existing[0].length)}`;
     if (value !== undefined) {
       const insertAt = /\/\s*>$/.test(next)
         ? next.lastIndexOf("/")
@@ -189,19 +253,101 @@ export function insertPlayableMotion(
   return source ? { html: updated, source, id } : undefined;
 }
 
+export function insertPlayableMediaElement(
+  html: string,
+  file: string,
+  assetId: string,
+  type: "image" | "video",
+  id: string,
+): { html: string; source: string } | undefined {
+  if (
+    !/^[a-z0-9._-]{1,120}$/i.test(assetId) ||
+    !/^putenggame-media-[\w-]+$/.test(id) ||
+    html.includes(id)
+  )
+    return undefined;
+  const root = /<([A-Za-z][\w-]*)\b[^>]*>/i.exec(html);
+  if (!root) return undefined;
+  const closingPattern = new RegExp(`<\\/\\s*${root[1]}\\s*>`, "gi");
+  let closing: RegExpExecArray | null;
+  let lastClosing: RegExpExecArray | null = null;
+  while ((closing = closingPattern.exec(html))) lastClosing = closing;
+  if (!lastClosing) return undefined;
+  const style =
+    "position:absolute;left:35cqw;top:30cqh;width:30cqw;max-height:60cqh;object-fit:contain";
+  const element =
+    type === "image"
+      ? `<img id="${id}" data-putenggame-asset="${escapeAttribute(assetId)}" alt="" draggable="false" style="${style}">`
+      : `<video id="${id}" data-putenggame-asset="${escapeAttribute(assetId)}" autoplay muted loop playsinline style="${style}"></video>`;
+  const offset = lastClosing.index;
+  const updated = `${html.slice(0, offset)}${element}${html.slice(offset)}`;
+  const annotated = annotatePlayableSourceLocations(updated, file);
+  const marker = `id="${id}"`;
+  const assetOffset = annotated.indexOf(marker);
+  const start = annotated.lastIndexOf("<", assetOffset);
+  const end = startTagEnd(annotated, start);
+  if (assetOffset < 0 || start < 0 || end === undefined) return undefined;
+  const source = /\sdata-putenggame-source="([^"]+)"/i.exec(
+    annotated.slice(start, end),
+  )?.[1];
+  return source ? { html: updated, source } : undefined;
+}
+
+export function insertPlayableButtonPreset(
+  html: string,
+  file: string,
+  id: string,
+  signal: string,
+  label: string,
+): { html: string; source: string } | undefined {
+  if (
+    !/^putenggame-button-[\w-]+$/.test(id) ||
+    html.includes(id) ||
+    !/^[a-z][a-z0-9-]*$/.test(signal) ||
+    !label.trim() ||
+    label.length > 120
+  )
+    return undefined;
+  const root = /<([A-Za-z][\w-]*)\b[^>]*>/i.exec(html);
+  if (!root) return undefined;
+  const closingPattern = new RegExp(`<\\/\\s*${root[1]}\\s*>`, "gi");
+  let closing: RegExpExecArray | null;
+  let lastClosing: RegExpExecArray | null = null;
+  while ((closing = closingPattern.exec(html))) lastClosing = closing;
+  if (!lastClosing) return undefined;
+  const element = `<button id="${id}" type="button" data-signal="${signal}" data-putenggame-button-preset style="position:absolute;left:50cqw;top:50cqh;transform:translate(-50%,-50%);min-width:14cqw;padding:1cqh 2cqw;border:1px solid rgba(255,255,255,.8);border-radius:6px;background:rgba(20,20,20,.78);color:#fff;font:inherit;cursor:pointer">${escapeAttribute(label)}</button>`;
+  const offset = lastClosing.index;
+  const updated = `${html.slice(0, offset)}${element}${html.slice(offset)}`;
+  const annotated = annotatePlayableSourceLocations(updated, file);
+  const idOffset = annotated.indexOf(`id="${id}"`);
+  const start = annotated.lastIndexOf("<", idOffset);
+  const end = startTagEnd(annotated, start);
+  if (idOffset < 0 || start < 0 || end === undefined) return undefined;
+  const source = /\sdata-putenggame-source="([^"]+)"/i.exec(
+    annotated.slice(start, end),
+  )?.[1];
+  return source ? { html: updated, source } : undefined;
+}
+
 export function mountPlayableMotionElement(
   element: HTMLElement,
   context: PlayableNodeContext,
   assetUrl?: string,
+  pressedAssetUrl?: string,
 ): () => void {
   const cleanups: (() => void)[] = [];
   const assetId = element.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.asset);
-  if (assetId) {
+  const pressedAssetId = element.getAttribute(
+    PLAYABLE_MOTION_ATTRIBUTES.pressedAsset,
+  );
+  if (assetId || pressedAssetId) {
     try {
       cleanups.push(
         mountPlayableButtonAsset(
           element,
-          assetUrl ?? context.assets.url(assetId),
+          assetId ? (assetUrl ?? context.assets.url(assetId)) : undefined,
+          pressedAssetUrl ??
+            (pressedAssetId ? context.assets.url(pressedAssetId) : undefined),
         ),
       );
     } catch {
@@ -215,7 +361,8 @@ export function mountPlayableMotionElement(
 
 function mountPlayableButtonAsset(
   element: HTMLElement,
-  assetUrl: string,
+  assetUrl?: string,
+  pressedAssetUrl?: string,
 ): () => void {
   const view = element.ownerDocument.defaultView;
   const previous = {
@@ -223,49 +370,192 @@ function mountPlayableButtonAsset(
     isolation: element.style.isolation,
     position: element.style.position,
     scale: element.style.scale,
+    transition: element.style.transition,
   };
-  const layer = element.ownerDocument.createElement("span");
-  layer.dataset.putenggameButtonAssetImage = "";
-  Object.assign(layer.style, {
-    position: "absolute",
-    inset: "0",
-    zIndex: "-1",
-    overflow: "hidden",
-    borderRadius: "inherit",
-    pointerEvents: "none",
-  });
-  const image = element.ownerDocument.createElement("img");
-  image.src = assetUrl;
-  image.alt = "";
-  image.draggable = false;
+  if (pressedAssetUrl) {
+    if (view?.getComputedStyle(element).position === "static")
+      element.style.position = "relative";
+    element.style.isolation = "isolate";
+  }
+  const layer = assetUrl
+    ? element.ownerDocument.createElement("span")
+    : undefined;
+  if (layer) {
+    layer.dataset.putenggameButtonAssetImage = "";
+    Object.assign(layer.style, {
+      position: "absolute",
+      inset: "0",
+      zIndex: "-1",
+      overflow: "hidden",
+      borderRadius: "inherit",
+      pointerEvents: "none",
+      ...(pressedAssetUrl ? { visibility: "visible" } : {}),
+    });
+  }
+  const image = assetUrl
+    ? element.ownerDocument.createElement("img")
+    : undefined;
+  if (image) {
+    image.src = assetUrl!;
+    image.alt = "";
+    image.draggable = false;
+  }
   const { x, y } = playableButtonAssetScales(element);
-  Object.assign(image.style, {
-    display: "block",
-    width: "100%",
-    height: "100%",
-    objectFit: "contain",
-  });
-  layer.append(image);
-  const label = wrapButtonLabel(element);
+  const [authoredScaleX, authoredScaleY] = parseScaleAxes(previous.scale);
+  const baseScale = assetUrl
+    ? formatScaleAxes(
+        authoredScaleX * (x / 100),
+        authoredScaleY * (y / 100),
+      )
+    : previous.scale;
+  if (image) {
+    Object.assign(image.style, {
+      display: "block",
+      width: "100%",
+      height: "100%",
+      objectFit: "contain",
+    });
+    layer?.append(image);
+  }
+  let pressedLayer: HTMLSpanElement | undefined;
+  if (pressedAssetUrl) {
+    pressedLayer = element.ownerDocument.createElement("span");
+    pressedLayer.dataset.putenggameButtonPressedImage = "";
+    Object.assign(pressedLayer.style, {
+      position: "absolute",
+      inset: "0",
+      zIndex: "-1",
+      overflow: "hidden",
+      borderRadius: "inherit",
+      pointerEvents: "none",
+      visibility: "hidden",
+    });
+    const pressedImage = element.ownerDocument.createElement("img");
+    pressedImage.src = pressedAssetUrl;
+    pressedImage.alt = "";
+    pressedImage.draggable = false;
+    Object.assign(pressedImage.style, {
+      display: "block",
+      width: "100%",
+      height: "100%",
+      objectFit: "contain",
+    });
+    pressedLayer.append(pressedImage);
+    element.append(pressedLayer);
+  }
+  let hovered = false;
+  let pointerHeld = false;
+  let keyboardHeld = false;
+  let scaleHeld = false;
+  let scaleBeforePress = "";
+  const updatePressedState = () => {
+    if (!pressedLayer) return;
+    const showPressed = hovered || pointerHeld || keyboardHeld;
+    pressedLayer.style.visibility = showPressed ? "visible" : "hidden";
+    if (layer) layer.style.visibility = showPressed ? "hidden" : "visible";
+    else
+      element.style.backgroundImage = showPressed
+        ? "none"
+        : previous.backgroundImage;
+    const shouldScale = pointerHeld || keyboardHeld;
+    if (shouldScale && !scaleHeld) {
+      scaleBeforePress = element.style.scale;
+      const [scaleX, scaleY] = parseScaleAxes(scaleBeforePress);
+      element.style.scale = formatScaleAxes(scaleX * 1.08, scaleY * 1.08);
+    } else if (!shouldScale && scaleHeld) {
+      element.style.scale = scaleBeforePress;
+    }
+    scaleHeld = shouldScale;
+  };
+  const onPointerEnter = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse") return;
+    hovered = true;
+    updatePressedState();
+  };
+  const onPointerLeave = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse") return;
+    hovered = false;
+    updatePressedState();
+  };
+  const onPointerDown = () => {
+    pointerHeld = true;
+    updatePressedState();
+  };
+  const onPointerUp = () => {
+    pointerHeld = false;
+    updatePressedState();
+  };
+  const onBlur = () => {
+    hovered = false;
+    pointerHeld = false;
+    keyboardHeld = false;
+    updatePressedState();
+  };
+  const onKeyDown = () => {
+    keyboardHeld = true;
+    updatePressedState();
+  };
+  const onKeyUp = () => {
+    keyboardHeld = false;
+    updatePressedState();
+  };
+  if (pressedLayer) {
+    const existingTransition =
+      previous.transition || view?.getComputedStyle(element).transition || "";
+    if (existingTransition && !existingTransition.includes("scale"))
+      element.style.transition = `${existingTransition}, scale 120ms ease`;
+    else if (!existingTransition)
+      element.style.transition = "scale 120ms ease";
+    element.addEventListener("pointerenter", onPointerEnter);
+    element.addEventListener("pointerleave", onPointerLeave);
+    element.addEventListener("pointerdown", onPointerDown, true);
+    view?.addEventListener("pointerup", onPointerUp, true);
+    view?.addEventListener("pointercancel", onPointerUp, true);
+    view?.addEventListener("blur", onBlur);
+    element.addEventListener("keydown", onKeyDown);
+    element.addEventListener("keyup", onKeyUp);
+  }
+  const label = assetUrl ? wrapButtonLabel(element) : undefined;
   const labelTranslate =
     element.getAttribute(PLAYABLE_MOTION_ATTRIBUTES.labelTranslate) ?? "";
   if (label) {
     label.style.scale = `${100 / x} ${100 / y}`;
     label.style.translate = labelTranslate;
   }
-  element.prepend(layer);
-  element.style.backgroundImage = "none";
-  element.style.isolation = "isolate";
-  element.style.scale = `${x / 100} ${y / 100}`;
+  if (layer) element.prepend(layer);
+  if (assetUrl) {
+    element.style.backgroundImage = "none";
+    element.style.isolation = "isolate";
+    element.style.scale = baseScale || formatScaleAxes(x / 100, y / 100);
+  }
   if (view?.getComputedStyle(element).position === "static")
     element.style.position = "relative";
   return () => {
-    layer.remove();
+    layer?.remove();
+    pressedLayer?.remove();
+    element.removeEventListener("pointerenter", onPointerEnter);
+    element.removeEventListener("pointerleave", onPointerLeave);
+    element.removeEventListener("pointerdown", onPointerDown, true);
+    view?.removeEventListener("pointerup", onPointerUp, true);
+    view?.removeEventListener("pointercancel", onPointerUp, true);
+    view?.removeEventListener("blur", onBlur);
+    element.removeEventListener("keydown", onKeyDown);
+    element.removeEventListener("keyup", onKeyUp);
     unwrapButtonLabel(label);
-    element.style.backgroundImage = previous.backgroundImage;
-    element.style.isolation = previous.isolation;
-    element.style.position = previous.position;
-    element.style.scale = previous.scale;
+    if (assetUrl || pressedAssetUrl) {
+      element.style.backgroundImage = previous.backgroundImage;
+    }
+    if (assetUrl) {
+      element.style.isolation = previous.isolation;
+      element.style.position = previous.position;
+      element.style.scale = previous.scale;
+    }
+    if (pressedAssetUrl) element.style.transition = previous.transition;
+    if (pressedAssetUrl && !assetUrl) {
+      element.style.position = previous.position;
+      element.style.isolation = previous.isolation;
+      element.style.scale = previous.scale;
+    }
   };
 }
 
@@ -311,8 +601,7 @@ function mountMotion(
   const computedStyle = view.getComputedStyle(element);
   const previousPosition = element.style.position;
   const previousCursor = element.style.cursor;
-  if (computedStyle.position === "static")
-    element.style.position = "relative";
+  if (computedStyle.position === "static") element.style.position = "relative";
   if (config.mode === "interactive") element.style.cursor = "pointer";
   const overlay = element.ownerDocument.createElement("span");
   overlay.dataset.putenggameMotionUi = "";
@@ -450,7 +739,8 @@ function mountMotion(
     if (finished) return;
     finished = true;
     if (config.mode === "visual") emit(config.signal);
-    else emit(config.timeoutSignal);
+    else if (config.timeoutSignal && context.navigation.connected(config.timeoutSignal))
+      void context.navigation.fail(config.timeoutSignal).catch(() => {});
   };
   const succeed = () => {
     if (finished) return;
@@ -557,7 +847,10 @@ function mountMotion(
       event.stopImmediatePropagation();
       return;
     }
-    if (config.signal && element.getAttribute("data-signal") === config.signal) {
+    if (
+      config.signal &&
+      element.getAttribute("data-signal") === config.signal
+    ) {
       finished = true;
       return;
     }
@@ -605,7 +898,9 @@ function motionAttributes(config: PlayableMotionConfig): string {
           `${PLAYABLE_MOTION_ATTRIBUTES.timeoutDuration}="${config.timeoutDuration}"`,
         ]),
     ...(config.signal
-      ? [`${PLAYABLE_MOTION_ATTRIBUTES.signal}="${escapeAttribute(config.signal)}"`]
+      ? [
+          `${PLAYABLE_MOTION_ATTRIBUTES.signal}="${escapeAttribute(config.signal)}"`,
+        ]
       : []),
     ...(config.timeoutSignal
       ? [
@@ -614,4 +909,3 @@ function motionAttributes(config: PlayableMotionConfig): string {
       : []),
   ].join(" ");
 }
-

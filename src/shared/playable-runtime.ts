@@ -354,6 +354,24 @@ export class NodeRuntime {
     return this.#started ? "running" : "idle";
   }
 
+  registerSignal(
+    nodeId: string,
+    signal: { id: string; label: string },
+  ): boolean {
+    const node = this.#graph.nodes.find((candidate) => candidate.id === nodeId);
+    if (
+      !node ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(signal.id) ||
+      !signal.label.trim() ||
+      signal.label.length > 120 ||
+      node.signals.some((candidate) => candidate.id === signal.id)
+    )
+      return false;
+    node.signals.push({ id: signal.id, label: signal.label });
+    this.#changed();
+    return true;
+  }
+
   async dispose(): Promise<void> {
     if (this.#disposePromise) return this.#disposePromise;
     this.#disposed = true;
@@ -552,6 +570,9 @@ export class NodeRuntime {
       ...this.#baseContext(token, abortController, node.assets),
       navigation: {
         emit: this.#guardAsync(token, (signal: string) =>
+          this.#emit(token, signal),
+        ),
+        fail: this.#guardAsync(token, (signal: string) =>
           this.#emit(token, signal),
         ),
         back: this.#guardAsync(token, () => this.#back(token)),

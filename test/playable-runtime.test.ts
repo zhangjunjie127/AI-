@@ -51,6 +51,24 @@ class FakeSurfaceHost implements PlayableSurfaceHost {
 }
 
 describe("Node Runtime", () => {
+  it("routes a failure through its declared Exit by default", async () => {
+    const { runtime, host } = createRuntime();
+    await runtime.start();
+
+    await nodeContext(host, "menu").navigation.fail("start");
+
+    expect(runtime.snapshot()).toMatchObject({
+      currentNodeId: "lobby",
+      recentSignals: [
+        expect.objectContaining({
+          nodeId: "menu",
+          signal: "start",
+          targetNodeId: "lobby",
+        }),
+      ],
+    });
+  });
+
   it("mounts the Entry Node and replaces the current Node", async () => {
     const { runtime, host } = createRuntime();
 
@@ -642,6 +660,24 @@ function seenRecord(nodes: string[]): PlayableSeen {
 }
 
 describe("NodeRuntime preview tooling", () => {
+  it("registers a newly added button Signal in the running preview", async () => {
+    const { runtime, host } = createRuntime({ policy: "report" });
+    await runtime.start();
+
+    expect(
+      runtime.registerSignal("menu", { id: "button-1", label: "新按钮" }),
+    ).toBe(true);
+    expect(
+      runtime.registerSignal("menu", { id: "button-1", label: "重复" }),
+    ).toBe(false);
+    await nodeContext(host, "menu").navigation.emit("button-1");
+
+    expect(runtime.snapshot().recentSignals).toEqual([
+      expect.objectContaining({ nodeId: "menu", signal: "button-1" }),
+    ]);
+    await runtime.dispose();
+  });
+
   it("reports Signals under the report policy without leaving the Node", async () => {
     const { runtime, host } = createRuntime({ policy: "report" });
     await runtime.start();
